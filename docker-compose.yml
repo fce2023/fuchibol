@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  db:
+    container_name: fuchibol_db
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: fuchibol_user
+      POSTGRES_PASSWORD: fuchibol_password
+      POSTGRES_DB: fuchibol_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    container_name: fuchibol_redis
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+
+  srs:
+    container_name: fuchibol_srs
+    build:
+      context: ./srs
+    restart: always
+    ports:
+      - "1935:1935"
+      - "1985:1985"
+      - "8080:8080"
+    volumes:
+      - srs_hls:/usr/local/srs/objs/nginx/html
+    depends_on:
+      - backend
+
+  backend:
+    container_name: fuchibol_backend
+    build:
+      context: ./backend
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      - srs_hls:/app/srs_hls
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://fuchibol_user:fuchibol_password@db:5432/fuchibol_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=fuchibol_super_secret_key_change_me_in_prod
+      - JWT_ALGORITHM=HS256
+      - HLS_BASE_URL=http://localhost/hls
+    depends_on:
+      - db
+      - redis
+
+  celery:
+    container_name: fuchibol_celery
+    build:
+      context: ./backend
+    restart: always
+    command: celery -A app.worker.celery_app worker --beat --loglevel=info
+    volumes:
+      - ./backend:/app
+      - srs_hls:/app/srs_hls
+    environment:
+      - DATABASE_URL=postgresql://fuchibol_user:fuchibol_password@db:5432/fuchibol_db
+      - REDIS_URL=redis://redis:6379/0
+      - HLS_BASE_URL=http://localhost/hls
+    depends_on:
+      - db
+      - redis
+
+  nginx:
+    container_name: fuchibol_nginx
+    build:
+      context: ./nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - srs_hls:/usr/share/nginx/html/hls
+    depends_on:
+      - backend
+      - frontend
+
+  frontend:
+    container_name: fuchibol_frontend
+    build:
+      context: ./frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+volumes:
+  pgdata:
+  srs_hls:

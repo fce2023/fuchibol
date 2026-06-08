@@ -1,0 +1,1 @@
+# Fuchibol app initialization
