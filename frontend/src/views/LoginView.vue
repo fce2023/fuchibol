@@ -127,17 +127,25 @@ const handleSubmit = async () => {
       })
       
       let username = form.email.split('@')[0]
+      let role = 'user'
       if (meRes.ok) {
         const meData = await meRes.json()
         username = meData.username
+        role = meData.role
       }
       
       localStorage.setItem('fuchibol_user', JSON.stringify({
         username: username,
+        role: role,
         token: data.access_token
       }))
       
-      router.push(`/${username}`)
+      // Redirection logic based on role
+      if (role === 'admin' || role === 'streamer') {
+        router.push('/admin')
+      } else {
+        router.push('/')
+      }
       
     } else {
       // API Register

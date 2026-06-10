@@ -24,23 +24,29 @@ def register_chat_handlers(sio: socketio.AsyncServer):
             params = parse_qs(query_string)
             token = params.get("token", [None])[0]
             
-        if not token:
-            print(f"Connection rejected for {sid}: missing token")
-            return False
-            
-        payload = decode_access_token(token)
-        if not payload:
-            print(f"Connection rejected for {sid}: invalid token")
-            return False
-            
-        # Store user details in session context
+        if token:
+            payload = decode_access_token(token)
+            if payload:
+                # Store user details in session context
+                await sio.save_session(sid, {
+                    "user_id": payload.get("user_id"),
+                    "email": payload.get("email"),
+                    "role": payload.get("role"),
+                    "username": payload.get("username", "Anon")
+                })
+                print(f"Client {sid} (User) connected successfully. User ID: {payload.get('user_id')}")
+                return True
+            else:
+                print(f"Client {sid} provided invalid token, connecting as Guest.")
+
+        # If no token or invalid token, connect as Guest
         await sio.save_session(sid, {
-            "user_id": payload.get("user_id"),
-            "email": payload.get("email"),
-            "role": payload.get("role"),
-            "username": payload.get("username", "Anon")
+            "user_id": None,
+            "email": None,
+            "role": "guest",
+            "username": f"Guest_{sid[:4]}"
         })
-        print(f"Client {sid} connected successfully. User ID: {payload.get('user_id')}")
+        print(f"Client {sid} (Guest) connected successfully.")
         return True
 
     @sio.event
@@ -68,10 +74,11 @@ def register_chat_handlers(sio: socketio.AsyncServer):
             
         session = await sio.get_session(sid)
         if not session:
-            return
+            # Ensure session exists even if connect failed somehow
+            session = {"user_id": None, "role": "guest", "username": f"Guest_{sid[:4]}"}
             
         # Add client to channel room
-        sio.enter_room(sid, f"channel_{channel_id}")
+        await sio.enter_room(sid, f"channel_{channel_id}")
         session["channel_id"] = channel_id
         await sio.save_session(sid, session)
         
@@ -87,7 +94,7 @@ def register_chat_handlers(sio: socketio.AsyncServer):
             return
         channel_id = session.get("channel_id")
         if channel_id:
-            sio.leave_room(sid, f"channel_{channel_id}")
+            await sio.leave_room(sid, f"channel_{channel_id}")
             viewers = await redis_client.decr(f"channel:{channel_id}:viewers")
             if viewers < 0:
                 await redis_client.set(f"channel:{channel_id}:viewers", 0)
@@ -104,7 +111,12 @@ def register_chat_handlers(sio: socketio.AsyncServer):
         session = await sio.get_session(sid)
         if not session:
             return
+            
         user_id = session.get("user_id")
+        if not user_id:
+            await sio.emit("error", {"message": "Debes iniciar sesión para chatear"}, to=sid)
+            return
+
         username = session.get("username", "Anon")
         channel_id = session.get("channel_id")
         
@@ -163,8 +175,12 @@ def register_chat_handlers(sio: socketio.AsyncServer):
                 insensitive_term = re.compile(re.escape(term), re.IGNORECASE)
                 filtered_content = insensitive_term.sub("*" * len(term), filtered_content)
 
+        import uuid
+        msg_id = str(uuid.uuid4())
+        
         # 3. Broadcast message
         msg_payload = {
+            "id": msg_id,
             "channel_id": channel_id,
             "user_id": user_id,
             "username": username,
@@ -175,9 +191,35 @@ def register_chat_handlers(sio: socketio.AsyncServer):
         
         # 4. Push message to Redis list queue for Celery bulk insert
         chat_msg_db = {
+            "id": msg_id,
             "channel_id": channel_id,
             "user_id": user_id,
             "content": filtered_content,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": msg_payload["timestamp"]
         }
         await redis_client.rpush("chat_queue", json.dumps(chat_msg_db))
+
+    @sio.event
+    async def delete_message(sid, data):
+        if not isinstance(data, dict):
+            return
+        session = await sio.get_session(sid)
+        if not session:
+            return
+        
+        role = session.get("role")
+        if role not in ["admin", "mod", "streamer"]:
+            await sio.emit("error", {"message": "No tienes permisos para borrar mensajes"}, to=sid)
+            return
+            
+        channel_id = session.get("channel_id")
+        msg_id = data.get("msg_id")
+        
+        if not channel_id or not msg_id:
+            return
+            
+        # Emit delete event to the room
+        await sio.emit("message_deleted", {"msg_id": msg_id}, room=f"channel_{channel_id}")
+        
+        # Ideally, we would also update the database here via Celery or directly
+        # but for real-time visual moderation this works.

@@ -1,20 +1,48 @@
 <template>
-  <div class="player-wrapper">
-    <video 
-      ref="videoRef" 
-      class="video-element" 
-      controls 
-      autoplay 
-      playsinline
-    ></video>
-    <div v-if="hasError" class="overlay error-overlay">
-      <p class="error-msg">Conexión con la transmisión perdida.</p>
-      <p class="retry-msg">Reconectando automáticamente...</p>
-    </div>
-    <div v-else-if="!isLive" class="overlay offline-overlay">
-      <span class="live-dot"></span>
-      <span class="offline-msg">EL STREAM ESTÁ OFFLINE</span>
-      <p class="offline-desc">Sintonizando señal en vivo...</p>
+  <div class="player-container" :class="{ 'is-loading': isLoading && isLive }" @mouseenter="showControls = true" @mouseleave="showControls = false">
+    <div class="player-aspect-ratio">
+      <video 
+        ref="videoRef" 
+        class="video-element" 
+        playsinline
+        webkit-playsinline
+        controls
+      ></video>
+
+      <!-- Selector de Calidad (ABR) -->
+      <div v-if="isLive && qualities.length > 1" class="quality-selector" :class="{ 'visible': showControls }">
+        <select v-model="currentQuality" @change="changeQuality" class="quality-dropdown">
+          <option :value="-1">Auto (Adaptativo)</option>
+          <option v-for="(q, index) in qualities" :key="index" :value="index">
+            {{ q.height }}p
+          </option>
+        </select>
+        <div class="abr-badge" title="Adaptive Bitrate Activo">ABR</div>
+      </div>
+
+      <!-- Pantalla de Carga (Sincronizando) -->
+      <div v-if="isLoading && isLive" class="overlay loading-overlay">
+        <div class="spinner"></div>
+        <p class="status-text">Sincronizando señal...</p>
+      </div>
+
+      <!-- Pantalla de Error -->
+      <div v-if="hasError && isLive" class="overlay error-overlay">
+        <div class="error-icon">⚠️</div>
+        <h3 class="status-title">Error de Conexión</h3>
+        <p class="status-text">Intentando reconectar automáticamente...</p>
+        <button @click="initPlayer" class="retry-btn">Reintentar ahora</button>
+      </div>
+
+      <!-- Pantalla Offline -->
+      <div v-if="!isLive" class="overlay offline-overlay">
+        <div class="offline-logo">
+          <div class="live-dot-pulse"></div>
+          <span class="offline-tag">OFFLINE</span>
+        </div>
+        <h3 class="status-title">Esperando Transmisión</h3>
+        <p class="status-text">La señal comenzará pronto. ¡No te muevas!</p>
+      </div>
     </div>
   </div>
 </template>
@@ -36,10 +64,22 @@ const props = defineProps({
 
 const videoRef = ref(null)
 const hasError = ref(false)
+const isLoading = ref(true)
+const showControls = ref(false)
+const qualities = ref([])
+const currentQuality = ref(-1)
+
 let hlsInstance = null
+let rtcConnection = null
 let retryTimer = null
 
-const initPlayer = () => {
+const changeQuality = () => {
+  if (hlsInstance) {
+    hlsInstance.currentLevel = currentQuality.value;
+  }
+}
+
+const initPlayer = async () => {
   if (retryTimer) {
     clearTimeout(retryTimer)
     retryTimer = null
@@ -47,6 +87,7 @@ const initPlayer = () => {
 
   if (!props.isLive || !props.streamUrl) {
     destroyPlayer()
+    isLoading.value = false
     return
   }
 
@@ -55,49 +96,146 @@ const initPlayer = () => {
 
   destroyPlayer()
   hasError.value = false
+  isLoading.value = true
+  qualities.value = []
+  currentQuality.value = -1
+  let isFirstPlay = true
 
+  // === WEBRTC LOGIC (OBS) ===
+  if (props.streamUrl.startsWith('webrtc://')) {
+    try {
+      rtcConnection = new RTCPeerConnection()
+      rtcConnection.addTransceiver("audio", {direction: "recvonly"})
+      rtcConnection.addTransceiver("video", {direction: "recvonly"})
+
+      rtcConnection.ontrack = (event) => {
+        video.srcObject = event.streams[0]
+      }
+
+      const offer = await rtcConnection.createOffer()
+      await rtcConnection.setLocalDescription(offer)
+
+      // El proxy de Nginx mapeará /rtc/ a SRS
+      const apiUrl = "https://fuchibol.elconsejosupremo.com/rtc/v1/play/"
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api: apiUrl,
+          streamurl: props.streamUrl,
+          sdp: offer.sdp
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error("WebRTC negotiation failed")
+      }
+
+      const data = await response.json()
+      await rtcConnection.setRemoteDescription(new RTCSessionDescription({
+        type: 'answer',
+        sdp: data.sdp
+      }))
+
+      isLoading.value = false
+      video.play().catch(e => console.log("Autoplay blocked"))
+      
+      rtcConnection.oniceconnectionstatechange = () => {
+        if (rtcConnection && (rtcConnection.iceConnectionState === 'disconnected' || rtcConnection.iceConnectionState === 'failed')) {
+          hasError.value = true
+          isLoading.value = false
+          retryTimer = setTimeout(initPlayer, 3000)
+        }
+      }
+    } catch (err) {
+      console.error("WebRTC Error:", err)
+      hasError.value = true
+      isLoading.value = false
+      retryTimer = setTimeout(initPlayer, 3000)
+    }
+    return
+  }
+
+  // === HLS LOGIC (IPTV PROXY) ===
   if (Hls.isSupported()) {
     hlsInstance = new Hls({
-      maxBufferLength: 10,
-      maxMaxBufferLength: 15,
+      maxBufferLength: 30, // Mayor buffer para absorber cortes
+      maxMaxBufferLength: 60,
       enableWorker: true,
-      lowLatencyMode: true,
+      lowLatencyMode: false, // DESACTIVAR baja latencia para IPTV pirata
+      manifestLoadingMaxRetry: 10,
+      fragLoadingMaxRetry: 10, // Reintentar fragmentos perdidos
+      levelLoadingMaxRetry: 10,
+      liveSyncDurationCount: 5, // Mantenerse un poco atrás del borde en vivo
+      capLevelToPlayerSize: true,
+      abrEwmaDefaultEstimate: 500000,
     })
 
     hlsInstance.loadSource(props.streamUrl)
     hlsInstance.attachMedia(video)
 
-    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-      console.warn('HLS Error:', data)
-      if (data.fatal) {
-        hasError.value = true
-        switch (data.type) {
-          case Hls.ErrorTypes.NETWORK_ERROR:
-            console.log('Network error, attempting recovery...')
-            hlsInstance.startLoad()
-            break;
-          case Hls.ErrorTypes.MEDIA_ERROR:
-            console.log('Media error, attempting recovery...')
-            hlsInstance.recoverMediaError()
-            break;
-          default:
-            console.log('Unrecoverable error, reloading stream in 3s...')
-            retryTimer = setTimeout(initPlayer, 3000)
-            break;
-        }
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+      isLoading.value = false
+      // Cargar calidades disponibles para el ABR
+      if (data.levels && data.levels.length > 0) {
+        qualities.value = data.levels.map(l => ({ height: l.height, bitrate: l.bitrate }))
+      }
+      if (isFirstPlay) {
+        video.play().catch(e => console.log("Autoplay blocked, waiting for interaction"))
+        isFirstPlay = false
       }
     })
+
+    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        // Errores de medios se recuperan en silencio
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          console.warn("IPTV Media Error (Salto de tiempo). Recuperando en silencio...");
+          hlsInstance.recoverMediaError();
+          return;
+        }
+
+        // Errores de red se recuperan en silencio intentando cargar de nuevo
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          console.warn("IPTV Network Error. Reintentando carga en silencio...");
+          hlsInstance.startLoad();
+          return;
+        }
+
+        // Si es otro error fatal, mostramos pantalla de error
+        hasError.value = true
+        isLoading.value = false
+        retryTimer = setTimeout(initPlayer, 3000)
+      }
+    })
+
+    // Detener la descarga de fragmentos si el usuario pone pausa
+    video.addEventListener('pause', () => {
+      if (hlsInstance) {
+        hlsInstance.stopLoad()
+      }
+    })
+
+    // Reanudar la descarga y forzar la sincronización al en vivo si da play
+    video.addEventListener('play', () => {
+      if (hlsInstance) {
+        hlsInstance.startLoad()
+      }
+    })
+
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    // Native HLS support
     video.src = props.streamUrl
+    video.addEventListener('loadedmetadata', () => {
+      isLoading.value = false
+      video.play()
+    })
     video.addEventListener('error', handleNativeError)
   }
 }
 
-const handleNativeError = () => {
-  hasError.value = true
-  console.log('Native HLS error, retrying in 3s...')
-  retryTimer = setTimeout(initPlayer, 3000)
+const handleNativeError = (e) => {
+  console.warn("Native video error (Ignored, relying on hls.js for recovery):", e)
 }
 
 const destroyPlayer = () => {
@@ -105,17 +243,25 @@ const destroyPlayer = () => {
     hlsInstance.destroy()
     hlsInstance = null
   }
+  if (rtcConnection) {
+    rtcConnection.close()
+    rtcConnection = null
+  }
   const video = videoRef.value
   if (video) {
+    video.srcObject = null
     video.removeAttribute('src')
     video.load()
     video.removeEventListener('error', handleNativeError)
   }
 }
 
-watch(() => [props.streamUrl, props.isLive], () => {
-  initPlayer()
-}, { deep: true })
+watch([() => props.streamUrl, () => props.isLive], (newVals, oldVals) => {
+  // Only re-init if the URL or live status actually changed
+  if (newVals[0] !== oldVals[0] || newVals[1] !== oldVals[1]) {
+    initPlayer()
+  }
+})
 
 onMounted(() => {
   initPlayer()
@@ -128,17 +274,29 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.player-wrapper {
+.player-container {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.player-aspect-ratio {
   position: relative;
   width: 100%;
-  height: 100%;
-  background: #000;
+  padding-top: 56.25%; /* 16:9 Aspect Ratio */
 }
 
 .video-element {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: #000;
 }
 
 .overlay {
@@ -151,35 +309,147 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle, rgba(21, 24, 33, 0.95) 0%, rgba(8, 10, 15, 0.98) 100%);
+  background: rgba(8, 10, 15, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   text-align: center;
   padding: 20px;
-  z-index: 2;
+  z-index: 10;
+  transition: all 0.3s ease;
 }
 
-.live-dot {
-  width: 12px;
-  height: 12px;
-  background: hsl(var(--text-muted));
-  border-radius: 50%;
-  margin-bottom: 15px;
+/* Quality Selector */
+.quality-selector {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
-.offline-msg, .error-msg {
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  color: hsl(var(--text-secondary));
-  margin-bottom: 8px;
+.quality-selector.visible {
+  opacity: 1;
 }
 
-.offline-desc, .retry-msg {
-  font-size: 13px;
-  color: hsl(var(--text-muted));
-}
-
-.retry-msg {
-  color: hsl(var(--primary));
+.quality-dropdown {
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+  outline: none;
+}
+
+.quality-dropdown:hover {
+  background: rgba(0, 0, 0, 0.8);
+  border-color: var(--green);
+}
+
+.abr-badge {
+  background: var(--green);
+  color: #000;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* Offline Styles */
+.offline-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  background: rgba(255,255,255,0.05);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.live-dot-pulse {
+  width: 10px;
+  height: 10px;
+  background: #444;
+  border-radius: 50%;
+}
+
+.offline-tag {
+  font-size: 12px;
+  font-weight: 800;
+  color: #888;
+  letter-spacing: 1px;
+}
+
+.status-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.status-text {
+  font-size: 14px;
+  color: rgba(255,255,255,0.6);
+  max-width: 280px;
+}
+
+/* Loading Spinner */
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(var(--primary-rgb), 0.1);
+  border-top-color: hsl(var(--primary));
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error Styles */
+.error-icon {
+  font-size: 40px;
+  margin-bottom: 10px;
+}
+
+.retry-btn {
+  margin-top: 20px;
+  padding: 10px 24px;
+  border-radius: 30px;
+  background: hsl(var(--primary));
+  color: #fff;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.retry-btn:hover {
+  transform: scale(1.05);
+}
+
+/* Mobile Optimizations */
+@media (max-width: 768px) {
+  .status-title {
+    font-size: 18px;
+  }
+  .status-text {
+    font-size: 12px;
+  }
+  .player-container {
+    border-radius: 0; /* Full width on mobile */
+  }
 }
 </style>

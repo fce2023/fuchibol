@@ -20,6 +20,11 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+
 class UserResponse(UserBase):
     id: int
     avatar_url: Optional[str] = None
@@ -36,6 +41,12 @@ class ChannelBase(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     slowmode_seconds: int = Field(default=0, ge=0)
+    iptv_urls: str = "[]"
+    active_iptv_url: Optional[str] = None
+    iptv_enabled: bool = False
+    agenda_events: str = "[]"
+    whatsapp_link: Optional[str] = None
+    tiktok_link: Optional[str] = None
 
 class ChannelCreate(ChannelBase):
     pass
@@ -45,6 +56,12 @@ class ChannelUpdate(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     slowmode_seconds: Optional[int] = Field(default=None, ge=0)
+    iptv_urls: Optional[str] = None
+    active_iptv_url: Optional[str] = None
+    iptv_enabled: Optional[bool] = None
+    agenda_events: Optional[str] = None
+    whatsapp_link: Optional[str] = None
+    tiktok_link: Optional[str] = None
 
 class ChannelResponse(ChannelBase):
     id: int

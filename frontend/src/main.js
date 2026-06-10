@@ -5,11 +5,13 @@ import App from './App.vue'
 import './style.css'
 
 const LoginView = () => import('./views/LoginView.vue')
-const ChannelView = () => import('./views/ChannelView.vue')
+const HomeView = () => import('./views/HomeView.vue')
+const AdminView = () => import('./views/AdminView.vue')
 
 const routes = [
-  { path: '/', name: 'login', component: LoginView },
-  { path: '/:username', name: 'channel', component: ChannelView }
+  { path: '/', name: 'home', component: HomeView },
+  { path: '/login', name: 'login', component: LoginView },
+  { path: '/admin', name: 'admin', component: AdminView }
 ]
 
 const router = createRouter({

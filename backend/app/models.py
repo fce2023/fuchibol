@@ -39,6 +39,20 @@ class Channel(Base):
     slowmode_seconds = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
     
+    # IPTV fields
+    iptv_urls = Column(String, default="[]", nullable=False) # JSON encoded list of URLs
+    active_iptv_url = Column(String, nullable=True)
+    iptv_enabled = Column(Boolean, default=False, nullable=False)
+    
+    # Agenda
+    agenda_events = Column(String, default="[]", nullable=False) # JSON encoded list of events
+    
+    # WhatsApp
+    whatsapp_link = Column(String, nullable=True)
+    
+    # TikTok
+    tiktok_link = Column(String, nullable=True)
+    
     # Relationships
     user = relationship("User", back_populates="channel")
     streams = relationship("Stream", back_populates="channel")

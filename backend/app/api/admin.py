@@ -108,3 +108,36 @@ async def metrics(db: AsyncSession = Depends(get_db)):
         f"fuchibol_registered_users_count {user_count}\n"
     )
     return metrics_str
+
+from pydantic import BaseModel
+class RoleUpdateRequest(BaseModel):
+    role: str
+
+@router.get("/users")
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(check_admin)
+):
+    result = await db.execute(select(User).order_by(User.id.desc()))
+    users = result.scalars().all()
+    return [{"id": u.id, "username": u.username, "email": u.email, "role": u.role} for u in users]
+
+@router.post("/users/{target_user_id}/role")
+async def update_user_role(
+    target_user_id: int,
+    role_req: RoleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(check_admin)
+):
+    if role_req.role not in ["admin", "mod", "user", "streamer"]:
+        raise HTTPException(status_code=400, detail="Rol inválido")
+        
+    result = await db.execute(select(User).where(User.id == target_user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+    user.role = role_req.role
+    await db.commit()
+    
+    return {"message": f"Rol actualizado a {role_req.role} para {user.username}"}

@@ -1,7 +1,8 @@
+import asyncio
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, streams, channels, admin
+from app.api import auth, streams, channels, admin, restream
 from app.utils.logging import setup_json_logging
 
 # Inicializar logs estructurados
@@ -28,6 +29,12 @@ fastapi_app.include_router(auth.router, prefix="/api/v1")
 fastapi_app.include_router(streams.router, prefix="/api/v1")
 fastapi_app.include_router(channels.router, prefix="/api/v1")
 fastapi_app.include_router(admin.router, prefix="/api/v1")
+fastapi_app.include_router(restream.router, prefix="/api/v1")
+
+@fastapi_app.on_event("startup")
+async def startup_event():
+    # Resume restreams that should be running
+    asyncio.create_task(restream.resume_restreams())
 
 @fastapi_app.get("/health")
 def health_check():

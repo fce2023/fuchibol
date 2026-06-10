@@ -1,13 +1,9 @@
 <template>
-  <div class="app-container">
+  <div class="app">
     <router-view />
   </div>
 </template>
 
 <style scoped>
-.app-container {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
+/* Scoped styles removed because .app is styled in style.css */
 </style>

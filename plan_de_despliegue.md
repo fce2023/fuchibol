@@ -12,7 +12,7 @@ graph TD
     Host -->|RTMP: 1935| SRS[fuchibol_srs:1935]
     Host -->|Port 80/443| HostNginx[Nginx del Host]
     HostNginx -->|Proxy: localhost:8080| ContainerNginx[fuchibol_nginx:80]
-    ContainerNginx -->|HTTP: 5173| Frontend[fuchibol_frontend]
+    ContainerNginx -->|HTTP: 80| Frontend[fuchibol_frontend]
     ContainerNginx -->|HTTP/WS: 8000| Backend[fuchibol_backend]
 ```
 
