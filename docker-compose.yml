@@ -46,6 +46,7 @@ services:
     volumes:
       - srs_hls:/app/srs_hls
       - uploads:/app/uploads
+      - ./hls_offline:/app/hls_offline
     ports:
       - "8005:8000"
     environment:
@@ -66,6 +67,7 @@ services:
     command: ./worker_server
     volumes:
       - srs_hls:/app/srs_hls
+      - ./hls_offline:/app/hls_offline
     environment:
       - DATABASE_URL=postgresql://fuchibol_user:fuchibol_password@db:5432/fuchibol_db
       - REDIS_URL=redis://redis:6379/0

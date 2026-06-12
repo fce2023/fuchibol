@@ -78,43 +78,12 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 			}
 		}
 		
-		var rewrittenLines []string
-		lines := strings.Split(bodyStr, "\n")
-		
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				rewrittenLines = append(rewrittenLines, line)
-				continue
-			}
-			
-			// If it's a tag line (starts with #)
-			if strings.HasPrefix(trimmed, "#") {
-				// Rewrite URIs inside tags (like URI="chunklist.m3u8" or URI="key.key")
-				rewrittenLine := reUri.ReplaceAllStringFunc(line, func(match string) string {
-					submatch := reUri.FindStringSubmatch(match)
-					if len(submatch) > 1 {
-						absUrl := resolveUrl(parsedTarget, submatch[1])
-						encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-						return fmt.Sprintf(`URI="%s/api/v1/proxy/ts?url=%s"`, c.BaseURL(), encodedUrl)
-					}
-					return match
-				})
-				rewrittenLines = append(rewrittenLines, rewrittenLine)
-			} else {
-				// 1. Rewrite plain URLs (usually .ts or nested .m3u8)
-				absUrl := resolveUrl(parsedTarget, trimmed)
-				encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-				newUrl := fmt.Sprintf("%s/api/v1/proxy/ts?url=%s", c.BaseURL(), encodedUrl)
-				rewrittenLines = append(rewrittenLines, newUrl)
-			}
-		}
-		
+		rewrittenLines := RewritePlaylistContent(bodyStr, parsedTarget, c.BaseURL())
 		c.Set("Content-Type", "application/vnd.apple.mpegurl")
 		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		c.Set("Pragma", "no-cache")
 		c.Set("Expires", "0")
-		return c.SendString(strings.Join(rewrittenLines, "\n"))
+		return c.SendString(rewrittenLines)
 	}
 
 	// For .ts files or keys, stream them transparently without modifications
@@ -157,4 +126,39 @@ func ProxyTS(c *fiber.Ctx) error {
 
 	targetUrl := string(decodedBytes)
 	return fetchAndProxy(c, targetUrl)
+}
+
+func RewritePlaylistContent(bodyStr string, parsedTarget *url.URL, baseURL string) string {
+	var rewrittenLines []string
+	lines := strings.Split(bodyStr, "\n")
+	
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			rewrittenLines = append(rewrittenLines, line)
+			continue
+		}
+		
+		// If it's a tag line (starts with #)
+		if strings.HasPrefix(trimmed, "#") {
+			// Rewrite URIs inside tags (like URI="chunklist.m3u8" or URI="key.key")
+			rewrittenLine := reUri.ReplaceAllStringFunc(line, func(match string) string {
+				submatch := reUri.FindStringSubmatch(match)
+				if len(submatch) > 1 {
+					absUrl := resolveUrl(parsedTarget, submatch[1])
+					encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
+					return fmt.Sprintf(`URI="/api/v1/proxy/ts?url=%s"`, encodedUrl)
+				}
+				return match
+			})
+			rewrittenLines = append(rewrittenLines, rewrittenLine)
+		} else {
+			// 1. Rewrite plain URLs (usually .ts or nested .m3u8)
+			absUrl := resolveUrl(parsedTarget, trimmed)
+			encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
+			newUrl := fmt.Sprintf("/api/v1/proxy/ts?url=%s", encodedUrl)
+			rewrittenLines = append(rewrittenLines, newUrl)
+		}
+	}
+	return strings.Join(rewrittenLines, "\n")
 }

@@ -2,7 +2,14 @@ package controllers
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"fuchibol-backend-go/database"
@@ -86,6 +93,214 @@ func GetPlaybackURL(c *fiber.Ctx) error {
 		"hls":          playbackUrl,
 		"webrtc":       fmt.Sprintf("webrtc://%s/live/%s", c.Hostname(), streamName),
 	})
+}
+
+type StreamState struct {
+	LastSignalType      string
+	SequenceOffset      int
+	LastRawSequence     int
+	LastSegmentCount    int
+	Discontinuities     []int
+}
+
+var (
+	stateMutex    sync.Mutex
+	channelStates = make(map[uint]*StreamState)
+)
+
+var (
+	reMediaSeq = regexp.MustCompile(`#EXT-X-MEDIA-SEQUENCE:(\d+)`)
+	reExtInf   = regexp.MustCompile(`#EXTINF:`)
+)
+
+func GetUnifiedManifest(c *fiber.Ctx) error {
+	id := c.Params("id")
+	var channel models.Channel
+	if err := database.DB.First(&channel, id).Error; err != nil {
+		return c.Status(404).SendString("Channel not found")
+	}
+
+	// 1. Determine active signal type
+	currentSignalType := "offline"
+	var rawPlaylist string
+	var err error
+
+	if channel.IsLive {
+		currentSignalType = "obs"
+		// Read OBS playlist from SRS HLS directory
+		streamName := channel.ActiveStreamName
+		if streamName == "" {
+			streamName = fmt.Sprintf("channel_%d", channel.ID)
+		}
+		path := fmt.Sprintf("/app/srs_hls/live/%s.m3u8", streamName)
+		contentBytes, fileErr := os.ReadFile(path)
+		if fileErr == nil {
+			rawPlaylist = string(contentBytes)
+		} else {
+			// Fallback to offline if SRS file doesn't exist yet
+			currentSignalType = "offline"
+		}
+	}
+
+	if currentSignalType == "offline" && channel.IptvEnabled && channel.ActiveIptvUrl != nil && *channel.ActiveIptvUrl != "" {
+		currentSignalType = "iptv"
+		// Download and rewrite IPTV playlist
+		rawPlaylist, err = downloadAndRewriteIPTV(channel.ID, *channel.ActiveIptvUrl, c.BaseURL())
+		if err != nil {
+			// Fallback to offline if IPTV fetch fails
+			currentSignalType = "offline"
+		}
+	}
+
+	if currentSignalType == "offline" {
+		// Read offline loop playlist
+		path := "/app/hls_offline/offline.m3u8"
+		contentBytes, fileErr := os.ReadFile(path)
+		if fileErr == nil {
+			rawPlaylist = string(contentBytes)
+			// Rewrite segments in offline playlist to be served relative to /hls/offline/
+			rawPlaylist = strings.ReplaceAll(rawPlaylist, "offline-", "/hls/offline/offline-")
+		} else {
+			return c.Status(404).SendString("No signal available and offline loop missing")
+		}
+	}
+
+	// 2. State management for smooth transitions
+	stateMutex.Lock()
+	state, exists := channelStates[channel.ID]
+	if !exists {
+		state = &StreamState{
+			LastSignalType:   currentSignalType,
+			SequenceOffset:   0,
+			LastRawSequence:  0,
+			LastSegmentCount: 3, // Default fallback count
+			Discontinuities:  []int{},
+		}
+		channelStates[channel.ID] = state
+	}
+
+	// Parse raw sequence number
+	rawSeq := 0
+	seqSubmatch := reMediaSeq.FindStringSubmatch(rawPlaylist)
+	if len(seqSubmatch) > 1 {
+		rawSeq, _ = strconv.Atoi(seqSubmatch[1])
+	}
+
+	// Detect signal type transition
+	if state.LastSignalType != currentSignalType {
+		// Calculate the virtual sequence of the last segment served in the previous playlist
+		lastVirtualSeqStart := state.LastRawSequence + state.SequenceOffset
+		lastVirtualSeqEnd := lastVirtualSeqStart + state.LastSegmentCount - 1
+		
+		// The new virtual sequence starts exactly after the last segment served
+		nextVirtualSeq := lastVirtualSeqEnd + 1
+		state.SequenceOffset = nextVirtualSeq - rawSeq
+		
+		// Record discontinuity at the transition boundary
+		state.Discontinuities = append(state.Discontinuities, nextVirtualSeq)
+		state.LastSignalType = currentSignalType
+	}
+
+	state.LastRawSequence = rawSeq
+	virtualSeq := rawSeq + state.SequenceOffset
+	stateMutex.Unlock()
+
+	// 3. Rewrite playlist with virtual sequence number and discontinuities
+	lines := strings.Split(rawPlaylist, "\n")
+	var rewrittenLines []string
+	segmentIndex := 0
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#EXT-X-MEDIA-SEQUENCE:") {
+			rewrittenLines = append(rewrittenLines, fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d", virtualSeq))
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "#EXTINF:") {
+			currentSegVirtualSeq := virtualSeq + segmentIndex
+			// Check if this segment needs a discontinuity tag injected before it
+			for _, dSeq := range state.Discontinuities {
+				if dSeq == currentSegVirtualSeq {
+					rewrittenLines = append(rewrittenLines, "#EXT-X-DISCONTINUITY")
+					break
+				}
+			}
+			segmentIndex++
+		}
+
+		rewrittenLines = append(rewrittenLines, line)
+	}
+
+	// Clean up old discontinuities that have slided out of the window
+	stateMutex.Lock()
+	var activeDiscontinuities []int
+	for _, dSeq := range state.Discontinuities {
+		if dSeq >= virtualSeq {
+			activeDiscontinuities = append(activeDiscontinuities, dSeq)
+		}
+	}
+	state.Discontinuities = activeDiscontinuities
+	// Save segment count of currently served playlist
+	state.LastSegmentCount = segmentIndex
+	stateMutex.Unlock()
+
+	c.Set("Content-Type", "application/vnd.apple.mpegurl")
+	c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Set("Pragma", "no-cache")
+	c.Set("Expires", "0")
+	return c.SendString(strings.Join(rewrittenLines, "\n"))
+}
+
+func downloadAndRewriteIPTV(channelID uint, targetUrl string, baseURL string) (string, error) {
+	req, err := http.NewRequest("GET", targetUrl, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "*/*")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bad status code: %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	parsedTarget, err := url.Parse(targetUrl)
+	if err != nil {
+		return "", err
+	}
+
+	bodyStr := string(bodyBytes)
+	
+	// If it's a master playlist, fetch the first nested stream
+	if strings.Contains(bodyStr, "#EXT-X-STREAM-INF") {
+		lines := strings.Split(bodyStr, "\n")
+		nestedUrlStr := ""
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				nestedUrlStr = resolveUrl(parsedTarget, trimmed)
+				break
+			}
+		}
+		if nestedUrlStr != "" {
+			return downloadAndRewriteIPTV(channelID, nestedUrlStr, baseURL)
+		}
+	}
+
+	rewrittenPlaylist := RewritePlaylistContent(bodyStr, parsedTarget, baseURL)
+	return rewrittenPlaylist, nil
 }
 
 type RestreamStartReq struct {

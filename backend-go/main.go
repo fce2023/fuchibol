@@ -81,6 +81,7 @@ func main() {
 	// Streams / Playback
 	streams := api.Group("/streams")
 	streams.Get("/playback/:id", controllers.GetPlaybackURL)
+	streams.Get("/playback/:id/manifest", controllers.GetUnifiedManifest)
 
 	// Restream
 	restream := api.Group("/restream")
