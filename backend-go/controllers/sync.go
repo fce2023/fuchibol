@@ -7,7 +7,6 @@ import (
 
 	"fuchibol-backend-go/database"
 	"fuchibol-backend-go/models"
-	"fuchibol-backend-go/services"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -55,21 +54,24 @@ func GetPlaybackURL(c *fiber.Ctx) error {
 	if err := database.DB.First(&channel, id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Channel not found"})
 	}
-	
-	// Format expected by VideoPlayer.vue
-	// OBS stream (channel_ID) takes priority if live
-	streamName := fmt.Sprintf("channel_%d", channel.ID)
-	
+
 	hlsBaseUrl := os.Getenv("HLS_BASE_URL")
 	if hlsBaseUrl == "" {
 		hlsBaseUrl = "/hls"
 	}
-	
-	playbackUrl := fmt.Sprintf("https://fuchibol.elconsejosupremo.com%s/live/%s.m3u8", hlsBaseUrl, streamName)
-	
-	// If OBS is not live and IPTV is enabled, use the Native IPTV Proxy instead of SRS!
-	if !channel.IsLive && channel.IptvEnabled {
-		playbackUrl = fmt.Sprintf("https://fuchibol.elconsejosupremo.com/api/v1/proxy/m3u8/%d", channel.ID)
+
+	var playbackUrl string
+	streamName := channel.ActiveStreamName
+	if streamName == "" {
+		streamName = fmt.Sprintf("channel_%d", channel.ID)
+	}
+
+	if channel.IsLive {
+		playbackUrl = fmt.Sprintf("%s%s/live/%s.m3u8", c.BaseURL(), hlsBaseUrl, streamName)
+	} else if channel.IptvEnabled && channel.ActiveIptvUrl != nil && *channel.ActiveIptvUrl != "" {
+		playbackUrl = fmt.Sprintf("%s/api/v1/proxy/m3u8/%d", c.BaseURL(), channel.ID)
+	} else {
+		playbackUrl = fmt.Sprintf("%s%s/offline/offline.m3u8", c.BaseURL(), hlsBaseUrl)
 	}
 
 	streamType := "hls"
@@ -82,7 +84,7 @@ func GetPlaybackURL(c *fiber.Ctx) error {
 		"is_live":      channel.IsLive || channel.IptvEnabled,
 		"stream_type":  streamType,
 		"hls":          playbackUrl,
-		"webrtc":       fmt.Sprintf("webrtc://fuchibol.elconsejosupremo.com/live/%s", streamName),
+		"webrtc":       fmt.Sprintf("webrtc://%s/live/%s", c.Hostname(), streamName),
 	})
 }
 
@@ -105,10 +107,10 @@ func RestreamStatus(c *fiber.Ctx) error {
 	// Calculate target (IPTV name) if active
 	target := ""
 	if channel.IptvEnabled {
-		target = "Decodificando señal..."
+		target = "Decodificando señal de forma nativa..."
 	}
 
-	isPausedByObs := channel.IsLive && !services.StatusRestream(channel.ID)
+	isPausedByObs := channel.IsLive && channel.IptvEnabled
 
 	return c.JSON(fiber.Map{
 		"is_active_restream": channel.IptvEnabled,
@@ -141,16 +143,11 @@ func RestreamStart(c *fiber.Ctx) error {
 	}
 	database.DB.Save(&channel)
 
-	// Native IPTV proxy requires no background processing!
-	// We bypass FFmpeg entirely to save CPU and prevent chunk-refreshing.
-	/*
-	if req.IptvUrl != "" {
-		services.StartRestream(channel.ID, req.IptvUrl)
-	}
-	*/
+	// Notify all viewers via WebSocket to reload the player
+	ChatHub.BroadcastType(channel.ID, "stream_reload", "La señal ha cambiado")
 
 	return c.JSON(fiber.Map{
-		"message": "Restream iniciado (Modo Proxy Nativo)",
+		"message": "Restream proxy nativo iniciado",
 	})
 }
 
@@ -169,8 +166,6 @@ func RestreamStop(c *fiber.Ctx) error {
 	channel.IptvEnabled = false
 	channel.IsLive = false
 	database.DB.Save(&channel)
-
-	services.StopRestream(channel.ID)
 
 	return c.JSON(fiber.Map{
 		"message": "Restream detenido",

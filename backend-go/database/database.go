@@ -40,6 +40,7 @@ func ConnectDB() {
 		&models.ChatMessage{},
 		&models.Follower{},
 		&models.BlockedTerm{},
+		&models.AnalyticsLog{},
 	)
 	if err != nil {
 		log.Println("AutoMigrate failed (ignoring for backward compatibility with Python DB): \n", err)

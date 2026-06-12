@@ -87,6 +87,7 @@ func OnPublish(c *fiber.Ctx) error {
 	if isObsStream {
 		// Update channel status
 		channel.IsLive = true
+		channel.ActiveStreamName = req.Stream
 		database.DB.Save(&channel)
 
 		// Create a new stream record
@@ -95,8 +96,13 @@ func OnPublish(c *fiber.Ctx) error {
 			Title:     channel.Name + " Live Stream", // Default title
 			Status:    "live",
 			StartTime: time.Now(),
+			CreatedAt: time.Now(),
 		}
 		database.DB.Create(&newStream)
+	} else {
+		// Even for IPTV restream, it's good to track the stream name
+		channel.ActiveStreamName = req.Stream
+		database.DB.Save(&channel)
 	}
 
 	// Return "0" to tell SRS it's authorized
@@ -153,6 +159,7 @@ func OnUnpublish(c *fiber.Ctx) error {
 		
 		if isObsStream {
 			channel.IsLive = false
+			channel.ActiveStreamName = ""
 			database.DB.Save(&channel)
 
 			// Find the active stream and mark it ended
@@ -168,6 +175,12 @@ func OnUnpublish(c *fiber.Ctx) error {
 			if channel.IptvEnabled && channel.ActiveIptvUrl != nil {
 				log.Printf("OBS disconnected for channel %d, auto-restarting IPTV restream", channel.ID)
 				services.StartRestream(channel.ID, *channel.ActiveIptvUrl)
+			}
+		} else {
+			// For IPTV unpublish, if we are clearing the stream name, make sure it's the one we expect
+			if channel.ActiveStreamName == req.Stream {
+				channel.ActiveStreamName = ""
+				database.DB.Save(&channel)
 			}
 		}
 	}

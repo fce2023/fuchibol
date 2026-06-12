@@ -2,9 +2,11 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"fuchibol-backend-go/controllers"
 	"fuchibol-backend-go/database"
+	"fuchibol-backend-go/services"
 	"fuchibol-backend-go/workers"
 
 	"github.com/gofiber/fiber/v2"
@@ -20,12 +22,20 @@ func main() {
 	// Initialize Background Jobs Client (Celery queue equivalent)
 	workers.InitAsynqClient()
 
+	// Resume active restreams
+	go func() {
+		// Wait a bit for DB and SRS to be ready
+		time.Sleep(2 * time.Second)
+		services.ResumeRestreams()
+	}()
+
 	// Arrancar el Hub de Chat (WebSockets) en segundo plano
 	go controllers.ChatHub.Run()
 
 	// Initialize Fiber App
 	app := fiber.New(fiber.Config{
 		AppName: "Fuchibol API (Go)",
+		ProxyHeader: "X-Forwarded-Proto",
 	})
 
 	// Middleware
@@ -66,6 +76,7 @@ func main() {
 	channels.Get("/me", controllers.GetMyChannel)
 	channels.Get("/:name", controllers.GetChannel)
 	channels.Patch("/me", controllers.UpdateChannel)
+	channels.Post("/logo", controllers.UploadLogo)
 
 	// Streams / Playback
 	streams := api.Group("/streams")
@@ -92,6 +103,11 @@ func main() {
 	admin.Get("/users", controllers.ListUsers)
 	admin.Post("/users/:id/ban", controllers.BanUser)
 
+	// Analytics
+	analytics := api.Group("/analytics")
+	analytics.Post("/track", controllers.TrackView)
+	analytics.Get("/summary", controllers.GetAnalyticsSummary)
+
 	// WebSockets Middleware (Asegura que es un upgrade de WS real)
 	app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
@@ -112,3 +128,4 @@ func main() {
 	log.Println("Starting Server on port 8000")
 	log.Fatal(app.Listen(":8000"))
 }
+

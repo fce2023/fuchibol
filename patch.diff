@@ -1,0 +1,458 @@
+diff --git a/backend-go/controllers/proxy.go b/backend-go/controllers/proxy.go
+index 42fc6b4..7c93c5d 100644
+--- a/backend-go/controllers/proxy.go
++++ b/backend-go/controllers/proxy.go
+@@ -1,19 +1,25 @@
+ package controllers
+ 
+ import (
++	"bufio"
+ 	"encoding/base64"
+ 	"fmt"
+ 	"io"
+ 	"net/http"
+ 	"net/url"
++	"os"
+ 	"regexp"
++	"strconv"
+ 	"strings"
++	"sync"
++	"time"
+ 
+ 	"fuchibol-backend-go/database"
+ 	"fuchibol-backend-go/models"
+ 	"github.com/gofiber/fiber/v2"
+ )
+ 
++
+ // Regexes for parsing m3u8 playlists
+ var reUri = regexp.MustCompile(`URI="([^"]+)"`)
+ 
+@@ -61,6 +67,23 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
+ 		}
+ 		
+ 		bodyStr := string(bodyBytes)
++
++		// If it's a master playlist containing nested streams, flatten it on the fly
++		// so the client only polls this static endpoint and switches channels automatically.
++		if strings.Contains(bodyStr, "#EXT-X-STREAM-INF") {
++			lines := strings.Split(bodyStr, "\n")
++			nestedUrlStr := ""
++			for _, line := range lines {
++				trimmed := strings.TrimSpace(line)
++				if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
++					nestedUrlStr = resolveUrl(parsedTarget, trimmed)
++					break
++				}
++			}
++			if nestedUrlStr != "" {
++				return fetchAndProxy(c, nestedUrlStr)
++			}
++		}
+ 		
+ 		var rewrittenLines []string
+ 		lines := strings.Split(bodyStr, "\n")
+@@ -80,7 +103,7 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
+ 					if len(submatch) > 1 {
+ 						absUrl := resolveUrl(parsedTarget, submatch[1])
+ 						encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
+-						return fmt.Sprintf(`URI="https://fuchibol.elconsejosupremo.com/api/v1/proxy/ts?url=%s"`, encodedUrl)
++						return fmt.Sprintf(`URI="%s/api/v1/proxy/ts?url=%s"`, c.BaseURL(), encodedUrl)
+ 					}
+ 					return match
+ 				})
+@@ -89,12 +112,15 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
+ 				// 1. Rewrite plain URLs (usually .ts or nested .m3u8)
+ 				absUrl := resolveUrl(parsedTarget, trimmed)
+ 				encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
+-				newUrl := fmt.Sprintf("https://fuchibol.elconsejosupremo.com/api/v1/proxy/ts?url=%s", encodedUrl)
++				newUrl := fmt.Sprintf("%s/api/v1/proxy/ts?url=%s", c.BaseURL(), encodedUrl)
+ 				rewrittenLines = append(rewrittenLines, newUrl)
+ 			}
+ 		}
+ 		
+ 		c.Set("Content-Type", "application/vnd.apple.mpegurl")
++		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
++		c.Set("Pragma", "no-cache")
++		c.Set("Expires", "0")
+ 		return c.SendString(strings.Join(rewrittenLines, "\n"))
+ 	}
+ 
+@@ -140,3 +166,335 @@ func ProxyTS(c *fiber.Ctx) error {
+ 	targetUrl := string(decodedBytes)
+ 	return fetchAndProxy(c, targetUrl)
+ }
++
++type HLSSegment struct {
++	URI       string
++	Duration  float64
++	SessionID string
++}
++
++type HLSChannelSession struct {
++	VirtualSequence    int64
++	Segments           []HLSSegment
++	LastSource         string
++	LastFirstSegURI    string
++	LastSeqNo          int64
++	SessionID          string
++	OfflineCounter     int
++	LastSegmentAddedAt time.Time
++}
++
++var (
++	hlsMutex    sync.Mutex
++	hlsSessions = make(map[uint]*HLSChannelSession)
++)
++
++type ParsedPlaylist struct {
++	MediaSequence  int64
++	TargetDuration int
++	Segments       []HLSSegment
++}
++
++func getChannelIDFromStream(stream string) uint {
++	if strings.Contains(stream, "master") {
++		return 1
++	}
++	parts := strings.Split(stream, "_")
++	if len(parts) >= 2 {
++		cleanPart := strings.TrimSuffix(parts[len(parts)-1], ".m3u8")
++		if id, err := strconv.Atoi(cleanPart); err == nil {
++			return uint(id)
++		}
++	}
++	return 1
++}
++
++func parseM3U8(filePath string, sourceName string) (*ParsedPlaylist, error) {
++	file, err := os.Open(filePath)
++	if err != nil {
++		return nil, err
++	}
++	defer file.Close()
++
++	playlist := &ParsedPlaylist{
++		MediaSequence:  0,
++		TargetDuration: 5,
++		Segments:       []HLSSegment{},
++	}
++
++	scanner := bufio.NewScanner(file)
++	var lastDuration float64
++	hasDuration := false
++
++	for scanner.Scan() {
++		line := strings.TrimSpace(scanner.Text())
++		if line == "" {
++			continue
++		}
++
++		if strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:") {
++			seqStr := strings.TrimPrefix(line, "#EXT-X-MEDIA-SEQUENCE:")
++			if seq, err := strconv.ParseInt(seqStr, 10, 64); err == nil {
++				playlist.MediaSequence = seq
++			}
++		} else if strings.HasPrefix(line, "#EXT-X-TARGETDURATION:") {
++			durStr := strings.TrimPrefix(line, "#EXT-X-TARGETDURATION:")
++			if dur, err := strconv.Atoi(durStr); err == nil {
++				playlist.TargetDuration = dur
++			}
++		} else if strings.HasPrefix(line, "#EXTINF:") {
++			infStr := strings.TrimPrefix(line, "#EXTINF:")
++			infStr = strings.TrimSuffix(infStr, ",")
++			if dur, err := strconv.ParseFloat(infStr, 64); err == nil {
++				lastDuration = dur
++				hasDuration = true
++			}
++		} else if !strings.HasPrefix(line, "#") {
++			if hasDuration {
++				uri := line
++				if !strings.HasPrefix(uri, "/") && !strings.HasPrefix(uri, "http") {
++					if sourceName == "offline" {
++						uri = "/hls/offline/" + uri
++					} else {
++						uri = "/hls/live/" + uri
++					}
++				}
++				playlist.Segments = append(playlist.Segments, HLSSegment{
++					URI:      uri,
++					Duration: lastDuration,
++				})
++				hasDuration = false
++			}
++		}
++	}
++
++	if err := scanner.Err(); err != nil {
++		return nil, err
++	}
++
++	return playlist, nil
++}
++
++func ProxyHLSPlaylist(c *fiber.Ctx) error {
++	stream := c.Params("stream")
++	streamName := strings.TrimSuffix(stream, ".m3u8")
++	channelID := getChannelIDFromStream(streamName)
++
++	hlsMutex.Lock()
++	session, exists := hlsSessions[channelID]
++	if !exists {
++		session = &HLSChannelSession{
++			VirtualSequence:    1,
++			Segments:           []HLSSegment{},
++			LastSource:         "",
++			LastFirstSegURI:    "",
++			LastSeqNo:          -1,
++			SessionID:          fmt.Sprintf("%d", time.Now().UnixNano()),
++			LastSegmentAddedAt: time.Now(),
++		}
++		hlsSessions[channelID] = session
++	}
++	hlsMutex.Unlock()
++
++	hlsMutex.Lock()
++	defer hlsMutex.Unlock()
++
++	currentSource := "offline"
++	physicalPath := "/app/srs_hls/offline/offline.m3u8"
++
++	obsPath := fmt.Sprintf("/app/srs_hls/live/channel_%d.m3u8", channelID)
++	iptvPath := fmt.Sprintf("/app/srs_hls/live/iptv_%d.m3u8", channelID)
++
++	if _, err := os.Stat(obsPath); err == nil {
++		currentSource = "obs"
++		physicalPath = obsPath
++	} else if _, err := os.Stat(iptvPath); err == nil {
++		currentSource = "iptv"
++		physicalPath = iptvPath
++	}
++
++	var playlist *ParsedPlaylist
++	var err error
++
++	if currentSource == "offline" {
++		if session.LastSource != "offline" {
++			session.SessionID = fmt.Sprintf("%d", time.Now().UnixNano())
++			session.LastSource = "offline"
++			session.LastFirstSegURI = ""
++			session.LastSeqNo = -1
++			session.LastSegmentAddedAt = time.Now()
++		}
++
++		if len(session.Segments) < 5 {
++			for len(session.Segments) < 5 {
++				session.OfflineCounter++
++				idx := session.OfflineCounter % 2
++				var dur float64
++				if idx == 0 {
++					dur = 5.166667
++				} else {
++					dur = 4.500000
++				}
++				uri := fmt.Sprintf("/hls/offline/offline%03d.ts?val=%d", idx, session.OfflineCounter)
++				session.Segments = append(session.Segments, HLSSegment{
++					URI:       uri,
++					Duration:  dur,
++					SessionID: session.SessionID,
++				})
++			}
++			session.LastSegmentAddedAt = time.Now()
++		} else {
++			lastSeg := session.Segments[len(session.Segments)-1]
++			if time.Since(session.LastSegmentAddedAt) >= time.Duration(lastSeg.Duration*1000)*time.Millisecond {
++				session.OfflineCounter++
++				idx := session.OfflineCounter % 2
++				var dur float64
++				if idx == 0 {
++					dur = 5.166667
++				} else {
++					dur = 4.500000
++				}
++				uri := fmt.Sprintf("/hls/offline/offline%03d.ts?val=%d", idx, session.OfflineCounter)
++				session.Segments = append(session.Segments, HLSSegment{
++					URI:       uri,
++					Duration:  dur,
++					SessionID: session.SessionID,
++				})
++				session.LastSegmentAddedAt = time.Now()
++			}
++		}
++		playlist = &ParsedPlaylist{
++			TargetDuration: 6,
++		}
++	} else {
++		playlist, err = parseM3U8(physicalPath, currentSource)
++		if err != nil {
++			currentSource = "offline"
++			session.SessionID = fmt.Sprintf("%d", time.Now().UnixNano())
++			session.LastSource = "offline"
++			session.LastFirstSegURI = ""
++			session.LastSeqNo = -1
++			session.LastSegmentAddedAt = time.Now()
++			for len(session.Segments) < 5 {
++				session.OfflineCounter++
++				idx := session.OfflineCounter % 2
++				var dur float64
++				if idx == 0 {
++					dur = 5.166667
++				} else {
++					dur = 4.500000
++				}
++				uri := fmt.Sprintf("/hls/offline/offline%03d.ts?val=%d", idx, session.OfflineCounter)
++				session.Segments = append(session.Segments, HLSSegment{
++					URI:       uri,
++					Duration:  dur,
++					SessionID: session.SessionID,
++				})
++			}
++			playlist = &ParsedPlaylist{
++				TargetDuration: 6,
++			}
++		} else {
++			isDiscontinuity := false
++			if session.LastSource != currentSource {
++				isDiscontinuity = true
++			} else if len(playlist.Segments) > 0 {
++				firstSegURI := playlist.Segments[0].URI
++				if playlist.MediaSequence < session.LastSeqNo {
++					isDiscontinuity = true
++				} else if session.LastFirstSegURI != "" && firstSegURI != session.LastFirstSegURI && playlist.MediaSequence == session.LastSeqNo {
++					isDiscontinuity = true
++				}
++			}
++
++			if isDiscontinuity {
++				session.SessionID = fmt.Sprintf("%d", time.Now().UnixNano())
++				session.LastSource = currentSource
++				session.LastSeqNo = playlist.MediaSequence
++				if len(playlist.Segments) > 0 {
++					session.LastFirstSegURI = playlist.Segments[0].URI
++				} else {
++					session.LastFirstSegURI = ""
++				}
++
++				for _, seg := range playlist.Segments {
++					session.Segments = append(session.Segments, HLSSegment{
++						URI:       seg.URI,
++						Duration:  seg.Duration,
++						SessionID: session.SessionID,
++					})
++				}
++			} else {
++				session.LastSource = currentSource
++				session.LastSeqNo = playlist.MediaSequence
++				if len(playlist.Segments) > 0 {
++					session.LastFirstSegURI = playlist.Segments[0].URI
++				}
++
++				for _, seg := range playlist.Segments {
++					alreadyExists := false
++					startIdx := len(session.Segments) - 15
++					if startIdx < 0 {
++						startIdx = 0
++					}
++					for i := startIdx; i < len(session.Segments); i++ {
++						if session.Segments[i].URI == seg.URI {
++							alreadyExists = true
++							break
++						}
++					}
++					if !alreadyExists {
++						session.Segments = append(session.Segments, HLSSegment{
++							URI:       seg.URI,
++							Duration:  seg.Duration,
++							SessionID: session.SessionID,
++						})
++					}
++				}
++			}
++		}
++	}
++
++	maxWindow := 8
++	if len(session.Segments) > maxWindow {
++		excess := len(session.Segments) - maxWindow
++		session.VirtualSequence += int64(excess)
++		session.Segments = session.Segments[excess:]
++	}
++
++	targetDuration := 6
++	if playlist != nil && playlist.TargetDuration > targetDuration {
++		targetDuration = playlist.TargetDuration
++	}
++	for _, seg := range session.Segments {
++		if int(seg.Duration)+1 > targetDuration {
++			targetDuration = int(seg.Duration) + 1
++		}
++	}
++
++	var sb strings.Builder
++	sb.WriteString("#EXTM3U\n")
++	sb.WriteString("#EXT-X-VERSION:3\n")
++	sb.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", targetDuration))
++	sb.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", session.VirtualSequence))
++
++	var lastSessionID string
++	for i, seg := range session.Segments {
++		if i > 0 && seg.SessionID != lastSessionID {
++			sb.WriteString("#EXT-X-DISCONTINUITY\n")
++		}
++		sb.WriteString(fmt.Sprintf("#EXTINF:%.6f,\n", seg.Duration))
++		sb.WriteString(seg.URI + "\n")
++		lastSessionID = seg.SessionID
++	}
++
++	c.Set("Content-Type", "application/vnd.apple.mpegurl")
++	c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
++	c.Set("Pragma", "no-cache")
++	c.Set("Expires", "0")
++	c.Set("Access-Control-Allow-Origin", "*")
++
++	return c.SendString(sb.String())
++}
++
++
+diff --git a/backend-go/main.go b/backend-go/main.go
+index de18d40..0173931 100644
+--- a/backend-go/main.go
++++ b/backend-go/main.go
+@@ -26,6 +26,7 @@ func main() {
+ 	// Initialize Fiber App
+ 	app := fiber.New(fiber.Config{
+ 		AppName: "Fuchibol API (Go)",
++		ProxyHeader: "X-Forwarded-Proto",
+ 	})
+ 
+ 	// Middleware
+@@ -66,10 +67,12 @@ func main() {
+ 	channels.Get("/me", controllers.GetMyChannel)
+ 	channels.Get("/:name", controllers.GetChannel)
+ 	channels.Patch("/me", controllers.UpdateChannel)
++	channels.Post("/logo", controllers.UploadLogo)
+ 
+ 	// Streams / Playback
+ 	streams := api.Group("/streams")
+ 	streams.Get("/playback/:id", controllers.GetPlaybackURL)
++	streams.Get("/hls/:stream", controllers.ProxyHLSPlaylist)
+ 
+ 	// Restream
+ 	restream := api.Group("/restream")
+@@ -92,6 +95,11 @@ func main() {
+ 	admin.Get("/users", controllers.ListUsers)
+ 	admin.Post("/users/:id/ban", controllers.BanUser)
+ 
++	// Analytics
++	analytics := api.Group("/analytics")
++	analytics.Post("/track", controllers.TrackView)
++	analytics.Get("/summary", controllers.GetAnalyticsSummary)
++
+ 	// WebSockets Middleware (Asegura que es un upgrade de WS real)
+ 	app.Use("/ws", func(c *fiber.Ctx) error {
+ 		if websocket.IsWebSocketUpgrade(c) {
+@@ -112,3 +120,4 @@ func main() {
+ 	log.Println("Starting Server on port 8000")
+ 	log.Fatal(app.Listen(":8000"))
+ }
++

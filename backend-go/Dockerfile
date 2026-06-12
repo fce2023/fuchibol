@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o worker_server cmd/worker/main.go
 
 # Final minimal image
 FROM alpine:latest
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg libwebp-tools
 WORKDIR /app
 
 # Copy binaries from builder

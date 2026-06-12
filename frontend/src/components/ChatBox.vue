@@ -48,7 +48,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['viewer-update'])
+const emit = defineEmits(['viewer-update', 'stream-reload'])
 
 const messages = ref([
   { type: 'system', content: 'Bienvenido al chat de Fuchibol. Sé respetuoso con los demás.' }
@@ -110,7 +110,14 @@ const connectSocket = () => {
       const msg = JSON.parse(event.data)
       
       if (msg.type === 'viewers' || msg.type === 'pong' || msg.type === 'ping') {
-        emit('viewer-update', msg.viewers)
+        if (msg.viewers !== undefined) {
+          emit('viewer-update', msg.viewers)
+        }
+        return
+      }
+
+      if (msg.type === 'stream_reload') {
+        emit('stream-reload')
         return
       }
       
@@ -129,11 +136,7 @@ const connectSocket = () => {
 
   socket.onerror = (err) => {
     console.error('WebSocket Error', err)
-    messages.value.push({
-      type: 'system error',
-      content: 'Error en la conexión del chat.'
-    })
-    scrollToBottom()
+    // Avoid spamming the chat window on minor network drops or server restarts
   }
 
   socket.onclose = () => {
@@ -214,7 +217,7 @@ onBeforeUnmount(() => {
 .chat-status-text { font-size: 10px; }
 .chat-messages {
   padding: 10px 14px; 
-  height: 250px;
+  height: 350px;
   overflow-y: auto;
 }
 .chat-msg {

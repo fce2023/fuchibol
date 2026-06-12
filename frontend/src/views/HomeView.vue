@@ -23,13 +23,9 @@
         <div class="home-main">
           <!-- Video Player -->
       <div class="video-wrap">
-        <VideoPlayer :streamUrl="playbackUrl" :isLive="channelInfo.is_live" />
+        <VideoPlayer :key="playerKey" :streamUrl="playbackUrl" :isLive="channelInfo.is_live" :channelId="channelInfo.id" />
         <div class="video-overlay" v-if="channelInfo.is_live"></div>
         <div class="video-top" v-if="channelInfo.is_live">
-          <div class="live-badge">
-            <div class="live-dot"></div>
-            <span class="live-text">EN VIVO</span>
-          </div>
           <div class="viewers">
             <div class="viewers-dot"></div>
             <span class="viewers-count">{{ viewerCount }} espectadores</span>
@@ -39,7 +35,8 @@
 
       <!-- Channel Row -->
       <div class="channel-row">
-        <div class="channel-icon">{{ channelOwner.substring(0, 2).toUpperCase() }}</div>
+        <img v-if="channelInfo.logo_url" class="channel-icon" :src="channelInfo.logo_url" alt="Logo" />
+        <div v-else class="channel-icon">{{ channelOwner.substring(0, 2).toUpperCase() }}</div>
         <div class="channel-info">
           <div class="channel-name">{{ channelInfo.name }}</div>
           <div class="channel-meta">
@@ -66,8 +63,14 @@
           <div class="match-title">{{ event.teams }}</div>
           <div class="match-time" :style="event.isActive ? 'color: #e83d00;' : ''">{{ event.time }}</div>
         </div>
-        <div class="match-pill" v-if="event.isActive" style="color: #e83d00; background: rgba(232,61,0,0.1); border-color: rgba(232,61,0,0.3);">AHORA</div>
-        <div class="match-pill" v-else>PRÓXIMO</div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+          <div class="match-pill" v-if="event.isActive" style="color: #e83d00; background: rgba(232,61,0,0.1); border-color: rgba(232,61,0,0.3);">AHORA</div>
+          <div class="match-pill" v-else>PRÓXIMO</div>
+          <button @click="shareMatch(event)" class="share-match-btn" title="Compartir partido">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+            Compartir
+          </button>
+        </div>
       </div>
 
 
@@ -76,6 +79,7 @@
         :channelId="channelInfo.id" 
         :currentUser="currentUser" 
         @viewer-update="handleViewerUpdate" 
+        @stream-reload="handleStreamReload"
       />
         </div>
       </div>
@@ -126,6 +130,7 @@ const currentUser = ref(null)
 const channelInfo = ref(null)
 const channelOwner = ref('')
 const playbackUrl = ref('')
+const playerKey = ref(0)
 const viewerCount = ref(0)
 const followerCount = ref(0)
 const isFollowing = ref(false)
@@ -144,10 +149,29 @@ const installApp = async () => {
   }
 }
 
+const shareMatch = async (event) => {
+  const text = `Partidos de futbol hoy ⚽\n\n${event.flags || ''} ${event.teams || ''}\n⏰ ${event.time || ''}\n\nMíralo en vivo aquí: ${window.location.href}`
+  
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'Fuchibol - En Vivo',
+        text: text,
+      })
+    } catch (err) {
+      console.log('Error sharing', err)
+    }
+  } else {
+    navigator.clipboard.writeText(text)
+    alert('¡Enlace e información copiados al portapapeles!')
+  }
+}
+
 const parsedAgendaEvents = computed(() => {
   if (!channelInfo.value || !channelInfo.value.agenda_events) return []
   try {
-    return JSON.parse(channelInfo.value.agenda_events)
+    const events = JSON.parse(channelInfo.value.agenda_events)
+    return Array.isArray(events) ? events.reverse() : []
   } catch (e) {
     return []
   }
@@ -155,6 +179,12 @@ const parsedAgendaEvents = computed(() => {
 
 const handleViewerUpdate = (count) => {
   viewerCount.value = count
+}
+
+const handleStreamReload = () => {
+  console.log("Señal de stream reload recibida por WS. Recargando reproductor...");
+  playerKey.value++
+  fetchChannel(true); // Refresca todo forzando el cache busting en la URL
 }
 
 const toggleFollow = async () => {
@@ -206,7 +236,7 @@ const logout = () => {
   router.push('/')
 }
 
-const fetchChannel = async () => {
+const fetchChannel = async (forceReload = false) => {
   try {
     const primaryRes = await fetch(`/api/v1/channels/primary`)
     if (!primaryRes.ok) {
@@ -227,10 +257,13 @@ const fetchChannel = async () => {
       const playData = await playRes.json()
       
       // Setup playback URL using webrtc or hls based on stream_type
-      const currentUrl = playData.stream_type === 'webrtc' ? playData.webrtc : playData.playback_url;
-      if (playbackUrl.value !== currentUrl) {
-        playbackUrl.value = currentUrl
+      let currentUrl = playData.stream_type === 'webrtc' ? playData.webrtc : playData.playback_url;
+      if (forceReload && currentUrl && (currentUrl.includes('.m3u8') || currentUrl.includes('/proxy/m3u8'))) {
+        const sep = currentUrl.includes('?') ? '&' : '?';
+        currentUrl = `${currentUrl}${sep}t=${Date.now()}`;
       }
+      
+      playbackUrl.value = currentUrl
       
       data.is_live = playData.is_live
     }
@@ -373,9 +406,22 @@ onBeforeUnmount(() => {
   left: 12px;
   right: 12px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   z-index: 10;
+}
+.video-bottom {
+  position: absolute;
+  bottom: 50px;
+  left: 12px;
+  z-index: 10;
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .video-bottom {
+    bottom: 60px;
+    left: 10px;
+  }
 }
 .live-badge {
   display: flex;
@@ -433,7 +479,35 @@ onBeforeUnmount(() => {
 }
 .match-info { flex: 1; }
 .match-title { font-size: 13px; font-weight: 600; color: #e0e0f0; }
-.match-time  { font-size: 11px; color: #00e87a; margin-top: 2px; font-weight: 500; }
+.match-time {
+  font-size: 13px;
+  color: #8c8c9a;
+  font-weight: 500;
+}
+
+.share-match-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #c0c0d8;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.share-match-btn:hover {
+  background: rgba(0, 232, 122, 0.15);
+  border-color: rgba(0, 232, 122, 0.4);
+  color: #00e87a;
+}
+
 .match-pill {
   background: rgba(0,232,122,0.1);
   border: 0.5px solid rgba(0,232,122,0.3);
@@ -471,6 +545,7 @@ onBeforeUnmount(() => {
   color: #00e87a;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+  object-fit: cover;
 }
 .channel-info { flex: 1; min-width: 0; }
 .channel-name { font-size: 13px; font-weight: 600; color: #e0e0f0; }
@@ -574,6 +649,17 @@ onBeforeUnmount(() => {
     height: auto;
     aspect-ratio: 16/9;
   }
+}
+
+@media (max-width: 480px) {
+  .topbar { padding: 10px 8px; }
+  .logo-text { font-size: 14px; }
+  .user-badge { padding: 4px 6px; }
+  .user-name { display: none; } /* Hide username on very small screens to save space */
+  .follow-btn, .exit-btn { font-size: 10px; padding: 4px 8px; }
+  .channel-row { flex-wrap: wrap; justify-content: center; text-align: center; }
+  .channel-meta { justify-content: center; }
+  .follow-btn { width: 100%; margin-top: 10px; }
 }
 </style>
 

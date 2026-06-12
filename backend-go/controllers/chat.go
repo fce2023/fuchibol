@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"fuchibol-backend-go/database"
 	"fuchibol-backend-go/models"
@@ -58,6 +59,16 @@ func broadcastViewers(h *Hub, channelID uint) {
 	}
 }
 
+// BroadcastType sends a system-level event to all clients in a specific channel
+func (h *Hub) BroadcastType(channelID uint, msgType string, content string) {
+	msg := ChatMessagePayload{
+		Type:      msgType,
+		ChannelID: channelID,
+		Content:   content,
+	}
+	h.broadcast <- msg
+}
+
 // Run starts the chat hub loop
 func (h *Hub) Run() {
 	for {
@@ -90,6 +101,7 @@ func (h *Hub) Run() {
 						ChannelID: m.ChannelID,
 						UserID:    m.UserID,
 						Content:   m.Content,
+						Timestamp: time.Now(),
 					}
 					database.DB.Create(&dbMsg)
 				}(msg)

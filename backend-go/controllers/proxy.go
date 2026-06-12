@@ -52,7 +52,7 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 	// Set CORS headers for everything
 	c.Set("Access-Control-Allow-Origin", "*")
 
-	// If it's a playlist, we MUST rewrite it
+	// If it's a playlist, we MUST rewrite it to point back to our proxy
 	if strings.Contains(strings.ToLower(contentType), "mpegurl") || strings.HasSuffix(parsedTarget.Path, ".m3u8") {
 		defer resp.Body.Close()
 		bodyBytes, err := io.ReadAll(resp.Body)
@@ -61,6 +61,22 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 		}
 		
 		bodyStr := string(bodyBytes)
+
+		// If it's a master playlist containing nested streams, flatten it on the fly
+		if strings.Contains(bodyStr, "#EXT-X-STREAM-INF") {
+			lines := strings.Split(bodyStr, "\n")
+			nestedUrlStr := ""
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+					nestedUrlStr = resolveUrl(parsedTarget, trimmed)
+					break
+				}
+			}
+			if nestedUrlStr != "" {
+				return fetchAndProxy(c, nestedUrlStr)
+			}
+		}
 		
 		var rewrittenLines []string
 		lines := strings.Split(bodyStr, "\n")
@@ -80,7 +96,7 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 					if len(submatch) > 1 {
 						absUrl := resolveUrl(parsedTarget, submatch[1])
 						encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-						return fmt.Sprintf(`URI="https://fuchibol.elconsejosupremo.com/api/v1/proxy/ts?url=%s"`, encodedUrl)
+						return fmt.Sprintf(`URI="%s/api/v1/proxy/ts?url=%s"`, c.BaseURL(), encodedUrl)
 					}
 					return match
 				})
@@ -89,16 +105,19 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 				// 1. Rewrite plain URLs (usually .ts or nested .m3u8)
 				absUrl := resolveUrl(parsedTarget, trimmed)
 				encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-				newUrl := fmt.Sprintf("https://fuchibol.elconsejosupremo.com/api/v1/proxy/ts?url=%s", encodedUrl)
+				newUrl := fmt.Sprintf("%s/api/v1/proxy/ts?url=%s", c.BaseURL(), encodedUrl)
 				rewrittenLines = append(rewrittenLines, newUrl)
 			}
 		}
 		
 		c.Set("Content-Type", "application/vnd.apple.mpegurl")
+		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Set("Pragma", "no-cache")
+		c.Set("Expires", "0")
 		return c.SendString(strings.Join(rewrittenLines, "\n"))
 	}
 
-	// For .ts files or keys, stream them transparently with 0 CPU processing
+	// For .ts files or keys, stream them transparently without modifications
 	c.Status(resp.StatusCode)
 	c.Set("Content-Type", contentType)
 	contentLength := resp.Header.Get("Content-Length")
@@ -106,7 +125,6 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 		c.Set("Content-Length", contentLength)
 	}
 	
-	// Fiber's SendStream takes ownership and will close the body automatically
 	return c.SendStream(resp.Body)
 }
 

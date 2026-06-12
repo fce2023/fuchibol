@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"os"
 	"time"
 
@@ -89,12 +90,18 @@ func Register(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Email or Username already exists"})
 	}
 
-	// Create an empty channel for the user
+	// Create an empty channel for the user with an initial stream key
+	rawKey := generateStreamKey()
 	channel := models.Channel{
-		UserID: user.ID,
-		Name:   user.Username + " Channel",
+		UserID:        user.ID,
+		Name:          user.Username + " Channel",
+		StreamKeyHash: HashStreamKey(rawKey),
+		KeyExpiresAt:  time.Now().AddDate(0, 3, 0), // 90 days
+		UpdatedAt:     time.Now(),
 	}
-	database.DB.Create(&channel)
+	if err := database.DB.Create(&channel).Error; err != nil {
+		log.Printf("Error creating channel during registration: %v", err)
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"message": "User registered successfully",
@@ -156,8 +163,8 @@ func RotateStreamKey(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
 	}
 
-	var channel models.Channel
-	if err := database.DB.Where("user_id = ?", userID).First(&channel).Error; err != nil {
+	channel, err := GetOrCreateChannel(userID)
+	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Channel not found"})
 	}
 
@@ -165,10 +172,40 @@ func RotateStreamKey(c *fiber.Ctx) error {
 	channel.StreamKeyHash = HashStreamKey(rawKey)
 	channel.KeyExpiresAt = time.Now().AddDate(0, 3, 0) // 90 days
 
-	database.DB.Save(&channel)
+	database.DB.Save(channel)
 
 	return c.JSON(fiber.Map{
 		"stream_key": rawKey,
 		"expires_at": channel.KeyExpiresAt,
 	})
+}
+
+// GetOrCreateChannel retrieves the user's channel or creates one if it doesn't exist (self-healing)
+func GetOrCreateChannel(userID uint) (*models.Channel, error) {
+	var channel models.Channel
+	err := database.DB.Where("user_id = ?", userID).First(&channel).Error
+	if err == nil {
+		return &channel, nil
+	}
+
+	// Channel doesn't exist, create it
+	var user models.User
+	if err := database.DB.First(&user, userID).Error; err != nil {
+		return nil, err
+	}
+
+	rawKey := generateStreamKey()
+	channel = models.Channel{
+		UserID:        userID,
+		Name:          user.Username + " Channel",
+		StreamKeyHash: HashStreamKey(rawKey),
+		KeyExpiresAt:  time.Now().AddDate(0, 3, 0), // 90 days
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := database.DB.Create(&channel).Error; err != nil {
+		return nil, err
+	}
+
+	return &channel, nil
 }

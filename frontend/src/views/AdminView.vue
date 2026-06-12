@@ -1,211 +1,417 @@
 <template>
   <div class="admin-layout">
-    <!-- Navbar -->
-    <header class="navbar glass-panel">
-      <div class="brand">
-        <router-link to="/" class="logo">⚽ FUCHIBOL</router-link>
+
+    <!-- ── SIDEBAR (desktop only) ── -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-dot"></div>
+        <span class="logo-text">FUCHIBOL</span>
       </div>
-      <div class="user-actions">
-        <span v-if="currentUser" class="username-badge">@{{ currentUser.username }}</span>
-        <router-link to="/" class="btn btn-primary btn-sm" style="margin-right:8px;">Ver Canal Público</router-link>
-        <button v-if="currentUser" @click="logout" class="btn btn-secondary btn-sm">Salir</button>
-      </div>
-    </header>
-
-    <!-- Main Content -->
-    <main class="content-container">
-      <div class="admin-header">
-        <h1>Panel de Administración</h1>
-      </div>
-
-      <div class="admin-grid">
-        <!-- User Profile Section -->
-        <div class="streamer-panel glass-card">
-          <div class="panel-header">
-            <h3>Mi Perfil</h3>
-          </div>
-          <form class="profile-form" @submit.prevent="updateProfile">
-            <div class="form-group">
-              <label>Nombre de Usuario</label>
-              <input v-model="profileData.username" type="text" class="input-field" autocomplete="username" placeholder="Username">
-            </div>
-            <div class="form-group">
-              <label>Nombre de tu Canal</label>
-              <input v-model="profileData.channelName" type="text" class="input-field" placeholder="Ej: Canal de Deportes">
-            </div>
-            <div class="form-group">
-              <label>Correo Electrónico</label>
-              <input v-model="profileData.email" type="email" class="input-field" autocomplete="email" placeholder="Email">
-            </div>
-            <div class="form-group">
-              <label>Enlace Grupo WhatsApp</label>
-              <input v-model="profileData.whatsappLink" type="url" class="input-field" placeholder="https://chat.whatsapp.com/...">
-            </div>
-            <div class="form-group">
-              <label>Enlace TikTok</label>
-              <input v-model="profileData.tiktokLink" type="url" class="input-field" placeholder="https://www.tiktok.com/@...">
-            </div>
-            <div class="form-group">
-              <label>Nueva Contraseña (opcional)</label>
-              <input v-model="profileData.password" type="password" class="input-field" autocomplete="new-password" placeholder="Dejar en blanco para no cambiar">
-            </div>
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="isUpdatingProfile">
-              {{ isUpdatingProfile ? 'Guardando...' : 'Guardar Cambios' }}
-            </button>
-          </form>
-        </div>
-
-        <!-- Streamer Dashboard / Keys Panel -->
-        <div class="streamer-panel glass-card">
-          <div class="panel-header">
-            <h3>Claves de Transmisión (Privado)</h3>
-            <button @click="rotateKey" class="btn btn-secondary btn-sm danger-text">Rotar Clave</button>
-          </div>
-          <p class="panel-desc">Configura tu software de transmisión (ej. OBS) con estos valores:</p>
-          <div class="key-field">
-            <label>URL del Servidor (Ingesta):</label>
-            <div class="input-copy-group">
-              <input type="text" readonly :value="serverUrl" class="input-field" />
-              <button @click="copyText(serverUrl)" class="btn btn-secondary">Copiar</button>
-            </div>
-          </div>
-          <div class="key-field">
-            <label>Clave de Transmisión (Stream Key):</label>
-            <div class="input-copy-group">
-              <input 
-                :type="showKey ? 'text' : 'password'" 
-                readonly 
-                :value="formattedStreamKey || '••••••••••••••••••••••••••••••••'" 
-                class="input-field key-input" 
-              />
-              <button @click="showKey = !showKey" class="btn btn-secondary">
-                {{ showKey ? 'Ocultar' : 'Ver' }}
-              </button>
-              <button v-if="formattedStreamKey" @click="copyText(formattedStreamKey)" class="btn btn-secondary">Copiar</button>
-              <button v-else @click="loadKey" class="btn btn-primary btn-sm">Revelar</button>
-            </div>
-            <span class="help-text">Instrucciones: Copia esta clave completa y pégala en el campo "Clave de retransmisión" de tu OBS.</span>
-          </div>
-
-          <div class="obs-optimizations mt-4 p-4 rounded-md" style="background: rgba(30,30,40,0.5); border-left: 4px solid var(--primary-color);">
-            <h4 style="color: var(--primary-color); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-              Optimizaciones para Ultra-Baja Latencia
-            </h4>
-            <ul style="font-size: 0.85rem; color: #a0a0b0; padding-left: 1.5rem; list-style-type: square; margin-bottom: 0;">
-              <li><strong>Salida (Avanzado) -> Codificador:</strong> x264 (o NVENC).</li>
-              <li><strong>Control de Frecuencia:</strong> CBR.</li>
-              <li><strong>Intervalo de fotogramas clave:</strong> 1 segundo <em>(Crítico para WebRTC)</em>.</li>
-              <li><strong>Perfil:</strong> baseline.</li>
-              <li><strong>Sintonizar (Tune):</strong> zerolatency.</li>
-              <li><strong>B-Frames:</strong> 0 <em>(Los cuadros B aumentan la latencia)</em>.</li>
-            </ul>
+      <nav class="sidebar-nav">
+        <a 
+          v-for="item in navItems" 
+          :key="item.id"
+          href="#"
+          :class="['sidebar-nav-item', { active: activeTab === item.id }]"
+          @click.prevent="selectTab(item.id)"
+        >
+          <i :class="item.icon"></i> {{ item.label }}
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-row">
+          <div class="avatar-sm">{{ currentUser?.username?.substring(0, 1).toUpperCase() }}</div>
+          <div>
+            <div class="user-name">@{{ currentUser?.username }}</div>
+            <div class="user-role">{{ currentUser?.role || 'ADMIN' }}</div>
           </div>
         </div>
+        <button class="btn-logout" @click="logout">
+          <i class="ti ti-logout"></i> Cerrar sesión
+        </button>
+      </div>
+    </aside>
 
-        <!-- IPTV Manager Panel -->
-        <div class="streamer-panel glass-card iptv-manager">
-          <div class="panel-header">
-            <h3>Gestor de Transmisión Externa (IPTV)</h3>
-            <div class="restream-controls">
-              <span v-if="isPausedByObs" class="status-badge paused">PAUSADO (OBS transmitiendo)</span>
-              <span v-else-if="isRestreaming" class="status-badge running">EN DIRECTO (Decodificando)</span>
-              <span v-else class="status-badge stopped">Apagado</span>
+    <!-- ── MAIN ── -->
+    <div class="main">
+
+      <!-- Mobile top bar -->
+      <header class="topbar">
+        <div class="logo-row">
+          <div class="logo-dot"></div>
+          <span class="logo-text">FUCHIBOL</span>
+        </div>
+        <div class="topbar-right">
+          <div class="icon-btn" @click="router.push('/')"><i class="ti ti-world"></i></div>
+          <div class="avatar-sm" @click="activeTab = 'profile'">{{ currentUser?.username?.substring(0, 1).toUpperCase() }}</div>
+        </div>
+      </header>
+
+      <!-- Desktop top bar -->
+      <div class="desktop-topbar">
+        <div>
+          <div class="desktop-title">{{ currentNavLabel }}</div>
+          <div class="desktop-sub">{{ currentNavDesc }}</div>
+        </div>
+        <button class="btn-public-desktop" @click="router.push('/')">
+          <i class="ti ti-external-link" style="font-size:14px"></i>
+          Ir al sitio público
+        </button>
+      </div>
+
+      <!-- Mobile hero -->
+      <div class="hero">
+        <div class="hero-title">{{ currentNavLabel }}</div>
+        <div class="hero-sub">{{ currentNavDesc }}</div>
+        <div v-if="activeTab === 'dashboard' && (isRestreaming || isPausedByObs)" class="badge-live"><span class="live-dot"></span>Canal en directo</div>
+      </div>
+
+      <div class="tab-content-container">
+        <!-- TAB: DASHBOARD -->
+        <div v-if="activeTab === 'dashboard'" class="tab-pane">
+          <!-- Stats -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon-row">
+                <div class="stat-icon teal"><i class="ti ti-eye"></i></div>
+                <span class="stat-label">Vistas totales</span>
+              </div>
+              <div class="stat-value">{{ analyticsSummary.total_views }}</div>
+              <div class="stat-delta">Vistas acumuladas</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon-row">
+                <div class="stat-icon blue"><i class="ti ti-clock"></i></div>
+                <span class="stat-label">Últimas 24h</span>
+              </div>
+              <div class="stat-value">{{ analyticsSummary.views_last_24h }}</div>
+              <div class="stat-delta">Vistas recientes</div>
+            </div>
+            <div class="stat-card wide">
+              <div class="stat-icon-row">
+                <div class="stat-icon purple"><i class="ti ti-users"></i></div>
+                <span class="stat-label">Seguidores</span>
+              </div>
+              <div class="stat-value">{{ followers.length }}</div>
+              <div class="stat-delta">Comunidad de tu canal</div>
+            </div>
+          </div>
+
+          <!-- Info cards -->
+          <div class="section">
+            <div class="bottom-grid">
+              <div class="info-card">
+                <div class="info-card-title">
+                  <i class="ti ti-broadcast"></i> Estado del canal
+                </div>
+                <div class="status-row">
+                  <span class="status-label">Señal actual</span>
+                  <span v-if="isRestreaming || isPausedByObs" class="badge-live" style="margin-top:0;font-size:11px;padding:3px 10px">
+                    <span class="live-dot"></span>En directo
+                  </span>
+                  <span v-else class="status-val">Offline</span>
+                </div>
+                <div class="status-row">
+                  <span class="status-label">Fuentes IPTV</span>
+                  <span class="status-val">{{ iptvUrlsObj.length }} guardadas</span>
+                </div>
+              </div>
+
+              <div class="info-card">
+                <div class="info-card-title">
+                  <i class="ti ti-world"></i> Tráfico por país
+                </div>
+                <div v-if="analyticsSummary.top_countries.length > 0" class="top-countries-list mt-2">
+                  <div v-for="c in analyticsSummary.top_countries" :key="c.country" class="status-row" style="padding: 5px 0; border: none;">
+                    <span class="status-label">{{ c.country }}</span>
+                    <span class="status-val">{{ c.count }} vistas</span>
+                  </div>
+                </div>
+                <div v-else class="empty-state">
+                  <i class="ti ti-map-2 empty-icon"></i>
+                  <div class="empty-text">Aún no hay datos de tráfico.<br>Transmite para ver de dónde te ven.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: PROFILE -->
+        <div v-if="activeTab === 'profile'" class="tab-pane section">
+          <div class="info-card">
+            <form class="profile-form" @submit.prevent="updateProfile">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Nombre de Usuario</label>
+                  <input v-model="profileData.username" type="text" class="input-field" autocomplete="username">
+                </div>
+                <div class="form-group">
+                  <label>Nombre de tu Canal</label>
+                  <input v-model="profileData.channelName" type="text" class="input-field">
+                </div>
+                <div class="form-group">
+                  <label>Correo Electrónico</label>
+                  <input v-model="profileData.email" type="email" class="input-field" autocomplete="email">
+                </div>
+                <div class="form-group">
+                  <label>Nueva Contraseña (opcional)</label>
+                  <input v-model="profileData.password" type="password" class="input-field" autocomplete="new-password" placeholder="Dejar en blanco para no cambiar">
+                </div>
+              </div>
               
-              <button v-if="!isRestreaming && !isPausedByObs" @click="startRestream" class="btn btn-primary btn-sm" :disabled="!activeIptvUrl || isProcessing">
-                {{ isProcessing ? 'Iniciando...' : '▶ Decodificar' }}
-              </button>
-              <button v-else @click="stopRestream" class="btn btn-secondary btn-sm danger-text" :disabled="isProcessing">
-                {{ isProcessing ? 'Deteniendo...' : '⏹ Detener' }}
-              </button>
-            </div>
-          </div>
-          <p class="panel-desc">Añade enlaces IPTV (HTTP/HTTPS) que se mostrarán automáticamente cuando no estés transmitiendo por OBS.</p>
-          
-          <div class="iptv-add-form">
-            <input type="url" v-model="newIptvUrl" placeholder="https://ejemplo.com/stream.m3u8" class="input-field" />
-            <button @click="addIptvUrl" class="btn btn-primary btn-sm" :disabled="!newIptvUrl.trim()">Añadir</button>
-          </div>
-          
-          <div v-if="iptvUrls.length > 0" class="iptv-list">
-            <div v-for="(url, index) in iptvUrls" :key="index" :class="['iptv-item', { active: url === activeIptvUrl }]">
-              <input type="radio" :id="'url-'+index" :value="url" v-model="activeIptvUrl" @change="saveIptvSettings" />
-              <label :for="'url-'+index" class="iptv-url-label">{{ url }}</label>
-              <button @click="removeIptvUrl(index)" class="btn btn-secondary btn-sm danger-text">Eliminar</button>
-            </div>
-          </div>
-          <div v-else class="empty-state">
-            <p>No has guardado ninguna URL de IPTV.</p>
-          </div>
-        </div>
-
-        <!-- Agenda Manager Panel -->
-        <div class="streamer-panel glass-card agenda-manager">
-          <div class="panel-header">
-            <h3>Gestor de Agenda (Eventos)</h3>
-            <button @click="addAgendaEvent" class="btn btn-primary btn-sm">Añadir Evento</button>
-          </div>
-          <p class="panel-desc">Configura los eventos que aparecerán debajo del video en la portada.</p>
-          
-          <div v-if="agendaEvents.length > 0" class="agenda-list">
-            <div v-for="(event, index) in agendaEvents" :key="index" class="agenda-item">
-              <div class="agenda-fields">
-                <input type="text" v-model="event.flags" placeholder="Banderas (ej: 🇦🇷🇮🇸)" class="input-field small-input" />
-                <input type="text" v-model="event.teams" placeholder="Equipos (ej: ARG vs ISL)" class="input-field" />
-                <input type="text" v-model="event.time" placeholder="Hora/Lugar (ej: Hoy · Alabama)" class="input-field" />
-                <label class="checkbox-label">
-                  <input type="checkbox" v-model="event.isActive" /> Activo (En Vivo)
-                </label>
+              <div class="divider"></div>
+              
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Enlace Grupo WhatsApp</label>
+                  <input v-model="profileData.whatsappLink" type="url" class="input-field" placeholder="https://chat.whatsapp.com/...">
+                </div>
+                <div class="form-group">
+                  <label>Enlace TikTok</label>
+                  <input v-model="profileData.tiktokLink" type="url" class="input-field" placeholder="https://www.tiktok.com/@...">
+                </div>
+                <div class="form-group logo-upload-group">
+                  <label>Logo del Canal (JPG/PNG)</label>
+                  <div class="logo-preview-container">
+                    <img v-if="profileData.logoUrl" :src="profileData.logoUrl" class="logo-preview" alt="Logo actual">
+                    <div v-else class="logo-placeholder">Sin Logo</div>
+                    <div class="upload-controls">
+                      <input type="file" ref="logoInput" accept="image/jpeg, image/png" @change="handleLogoSelect" class="hidden-input">
+                      <button type="button" @click="$refs.logoInput.click()" class="btn btn-secondary btn-sm">Seleccionar</button>
+                      <button type="button" v-if="selectedLogoFile" @click="uploadLogo" class="btn btn-primary btn-sm ml-2" :disabled="isUploadingLogo">
+                        {{ isUploadingLogo ? 'Subiendo...' : 'Optimizar y Subir' }}
+                      </button>
+                    </div>
+                  </div>
+                  <small v-if="selectedLogoFile" class="file-name-hint">Archivo: {{ selectedLogoFile.name }}</small>
+                </div>
               </div>
-              <button @click="removeAgendaEvent(index)" class="btn btn-secondary btn-sm danger-text">X</button>
-            </div>
-          </div>
-          <div v-else class="empty-state">
-            <p>No hay eventos programados.</p>
-          </div>
-          <div class="panel-footer" style="margin-top: 15px; display: flex; justify-content: flex-end;">
-            <button @click="saveAgendaSettings" class="btn btn-primary btn-sm" :disabled="isSavingAgenda">
-              {{ isSavingAgenda ? 'Guardando...' : 'Guardar Agenda' }}
-            </button>
+              
+              <div class="form-actions mt-4">
+                <button type="submit" class="btn btn-primary w-full" :disabled="isUpdatingProfile">
+                  {{ isUpdatingProfile ? 'Guardando...' : 'Guardar Cambios' }}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 
-        <!-- Followers Manager Panel -->
-        <div class="streamer-panel glass-card followers-manager">
-          <div class="panel-header">
-            <h3>Mis Seguidores ({{ followers.length }})</h3>
-          </div>
-          <p class="panel-desc">Usuarios que han decidido seguir tu canal.</p>
-          
-          <div v-if="followers.length > 0" class="followers-list">
-            <div v-for="follower in followers" :key="follower.id" class="follower-item">
-              <div class="follower-avatar">{{ follower.username.substring(0, 1).toUpperCase() }}</div>
-              <div class="follower-info">
-                <span class="follower-username">@{{ follower.username }}</span>
+        <!-- TAB: STREAM -->
+        <div v-if="activeTab === 'stream'" class="tab-pane section">
+          <!-- Keys Panel -->
+          <div class="info-card mb-4">
+            <div class="panel-header flex-between mb-4">
+              <div class="info-card-title mb-0"><i class="ti ti-key"></i> Claves OBS</div>
+              <button @click="rotateKey" class="btn btn-secondary btn-sm danger-text">Rotar Clave</button>
+            </div>
+            
+            <div class="key-field mb-4">
+              <label>Servidor RTMP</label>
+              <div class="input-copy-group">
+                <input type="text" readonly :value="serverUrl" class="input-field" />
+                <button @click="copyText(serverUrl)" class="btn btn-secondary btn-sm">Copiar</button>
+              </div>
+            </div>
+            
+            <div class="key-field mb-4">
+              <label>Clave de Transmisión</label>
+              <div class="input-copy-group">
+                <input 
+                  :type="showKey ? 'text' : 'password'" 
+                  readonly 
+                  :value="formattedStreamKey || '••••••••••••••••••••••••••••••••'" 
+                  class="input-field key-input" 
+                />
+                <button @click="showKey = !showKey" class="btn btn-secondary btn-sm">
+                  {{ showKey ? 'Ocultar' : 'Ver' }}
+                </button>
+                <button v-if="formattedStreamKey" @click="copyText(formattedStreamKey)" class="btn btn-secondary btn-sm">Copiar</button>
+                <button v-else @click="loadKey" class="btn btn-primary btn-sm">Revelar</button>
               </div>
             </div>
           </div>
-          <div v-else class="empty-state">
-            <p>Aún no tienes seguidores. ¡Anima a tu audiencia a seguirte!</p>
+
+          <!-- IPTV Manager -->
+          <div class="info-card">
+            <div class="panel-header flex-between mb-4">
+              <div class="info-card-title mb-0"><i class="ti ti-device-tv"></i> Gestor IPTV</div>
+              <div class="status-controls">
+                <span v-if="isPausedByObs" class="status-badge paused">PAUSADO</span>
+                <span v-else-if="isRestreaming" class="status-badge running">ACTIVO</span>
+                <span v-else class="status-badge stopped">APAGADO</span>
+              </div>
+            </div>
+            
+            <div class="iptv-add-form-new mb-4">
+              <div class="form-group mb-2">
+                <label>Nombre del Canal TV</label>
+                <input type="text" v-model="newIptvName" placeholder="Ej: ESPN Premium" class="input-field" />
+              </div>
+              <div class="form-group mb-2">
+                <label>URL del Stream (m3u8)</label>
+                <div class="input-copy-group">
+                  <input type="url" v-model="newIptvUrl" placeholder="https://..." class="input-field" />
+                  <button @click="addIptvUrl" class="btn btn-primary btn-sm" :disabled="!newIptvUrl.trim()">Añadir</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="iptv-list-new mb-4">
+              <div v-for="(item, index) in iptvUrlsObj" :key="index" :class="['iptv-item-new', { active: item.url === activeIptvUrl }]">
+                <template v-if="editingIptvIndex === index">
+                  <div class="edit-form-inline">
+                    <input type="text" v-model="editingIptvData.name" class="input-field mb-2" placeholder="Nombre">
+                    <input type="url" v-model="editingIptvData.url" class="input-field mb-2" placeholder="URL">
+                    <div class="edit-actions">
+                      <button @click="saveEditedIptv" class="btn btn-primary btn-sm">OK</button>
+                      <button @click="cancelEditingIptv" class="btn btn-secondary btn-sm">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="item-radio">
+                    <input type="radio" :id="'url-'+index" :value="item.url" v-model="activeIptvUrl" @change="saveIptvSettings" />
+                  </div>
+                  <label :for="'url-'+index" class="item-details">
+                    <span class="item-name">{{ item.name || 'Sin Nombre' }}</span>
+                    <span class="item-url">{{ item.url }}</span>
+                  </label>
+                  <div class="item-actions">
+                    <button @click="startEditingIptv(index)" class="btn-icon"><i class="ti ti-edit"></i></button>
+                    <button @click="removeIptvUrl(index)" class="btn-icon danger"><i class="ti ti-trash"></i></button>
+                  </div>
+                </template>
+              </div>
+            </div>
+            
+            <div class="panel-footer mt-4">
+              <button v-if="!isRestreaming && !isPausedByObs" @click="startRestream" class="btn btn-primary w-full" :disabled="!activeIptvUrl || isProcessing">
+                {{ isProcessing ? 'Iniciando...' : 'Iniciar Decodificador' }}
+              </button>
+              <button v-else @click="stopRestream" class="btn btn-secondary danger-text w-full" :disabled="isProcessing">
+                {{ isProcessing ? 'Deteniendo...' : 'Detener Decodificador' }}
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="info-card glass-card">
-          <h3>Gestión de Moderadores</h3>
-          <p>La gestión de roles estará disponible en una próxima actualización.</p>
-          <p>Para probar asignar un moderador ahora, utiliza la API: <code>POST /api/v1/admin/users/{user_id}/role</code> con el token de administrador.</p>
+        <!-- TAB: AGENDA -->
+        <div v-if="activeTab === 'agenda'" class="tab-pane section">
+          <div class="info-card">
+            <div class="panel-header flex-between mb-4">
+              <div class="info-card-title mb-0"><i class="ti ti-calendar-event"></i> Próximos Eventos</div>
+              <button @click="addAgendaEvent" class="btn btn-primary btn-sm">+ Nuevo</button>
+            </div>
+            
+            <div class="agenda-grid mt-4">
+              <div v-for="(event, index) in agendaEvents" :key="index" class="agenda-card-new stat-card" style="padding: 16px;">
+                <div class="event-fields">
+                  <div class="form-group mb-2">
+                    <label>Banderas</label>
+                    <input type="text" v-model="event.flags" placeholder="🇦🇷 🇧🇷" class="input-field">
+                  </div>
+                  <div class="form-group mb-2">
+                    <label>Equipos / Título</label>
+                    <input type="text" v-model="event.teams" placeholder="Local vs Visitante" class="input-field">
+                  </div>
+                  <div class="form-group mb-2">
+                    <label>Horario / Info</label>
+                    <input type="text" v-model="event.time" placeholder="Hoy 20:00" class="input-field">
+                  </div>
+                </div>
+                <div class="event-actions mt-4 flex-between">
+                  <label class="toggle-switch">
+                    <input type="checkbox" v-model="event.isActive">
+                    <span class="slider"></span>
+                    <span class="label">EN VIVO</span>
+                  </label>
+                  <button @click="removeAgendaEvent(index)" class="btn-icon danger">
+                    <i class="ti ti-trash"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div v-if="agendaEvents.length === 0" class="empty-state">
+              <i class="ti ti-calendar-off empty-icon"></i>
+              <div class="empty-text">No hay eventos programados.</div>
+            </div>
+
+            <div class="form-actions mt-4">
+              <button @click="saveAgendaSettings" class="btn btn-primary w-full" :disabled="isSavingAgenda">
+                {{ isSavingAgenda ? 'Guardando...' : 'Guardar Agenda' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: FOLLOWERS -->
+        <div v-if="activeTab === 'followers'" class="tab-pane section">
+          <div class="info-card">
+            <div class="info-card-title"><i class="ti ti-users"></i> Comunidad</div>
+            <div class="followers-grid-new mt-4">
+              <div v-for="follower in followers" :key="follower.id" class="follower-card-new stat-card" style="padding:10px; display:flex; gap:10px; align-items:center;">
+                <div class="avatar-sm">{{ follower.username.substring(0, 1).toUpperCase() }}</div>
+                <div class="info">
+                  <div class="user-name">@{{ follower.username }}</div>
+                  <div class="stat-delta">Desde {{ formatDate(follower.created_at) }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-if="followers.length === 0" class="empty-state">
+              <i class="ti ti-user-off empty-icon"></i>
+              <div class="empty-text">Aún no tienes seguidores.</div>
+            </div>
+          </div>
         </div>
       </div>
-    </main>
-  </div>
+
+    </div><!-- /main -->
+
+    <!-- ── BOTTOM NAV (mobile only) ── -->
+    <nav class="bottom-nav">
+      <a 
+        v-for="item in navItems" 
+        :key="item.id"
+        href="#"
+        :class="['nav-tab', { active: activeTab === item.id }]"
+        @click.prevent="selectTab(item.id)"
+      >
+        <i :class="item.icon"></i>
+        <span>{{ item.label }}</span>
+      </a>
+    </nav>
+
+  </div><!-- /app -->
 </template>
 
+
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const currentUser = ref(null)
+const isSidebarCollapsed = ref(true) // Collapsed by default on mobile
+const activeTab = ref('dashboard')
+
+const navItems = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'ti ti-layout-dashboard', desc: 'Resumen de actividad y estadísticas' },
+  { id: 'profile', label: 'Mi Perfil', icon: 'ti ti-user', desc: 'Información de tu cuenta y canal' },
+  { id: 'stream', label: 'Transmisión', icon: 'ti ti-video', desc: 'Gestión de claves OBS y fuentes IPTV' },
+  { id: 'agenda', label: 'Agenda', icon: 'ti ti-calendar-event', desc: 'Programación de eventos para tu canal' },
+  { id: 'followers', label: 'Seguidores', icon: 'ti ti-users', desc: 'Comunidad de usuarios que te siguen' }
+]
+
+const currentNavLabel = computed(() => navItems.find(i => i.id === activeTab.value)?.label)
+const currentNavDesc = computed(() => navItems.find(i => i.id === activeTab.value)?.desc)
+
+const selectTab = (id) => {
+  activeTab.value = id
+  if (window.innerWidth < 1024) {
+    isSidebarCollapsed.value = true
+  }
+}
 
 const channelId = ref('1')
 const showKey = ref(false)
@@ -224,12 +430,36 @@ const getRtmpServerUrl = () => {
 }
 
 // IPTV refs
-const iptvUrls = ref([])
+const iptvUrlsObj = ref([])
 const activeIptvUrl = ref(null)
 const newIptvUrl = ref('')
+const newIptvName = ref('')
 const isRestreaming = ref(false)
 const isPausedByObs = ref(false)
+const editingIptvIndex = ref(-1)
+const editingIptvData = ref({ name: '', url: '' })
 let statusInterval = null
+
+const startEditingIptv = (index) => {
+  editingIptvIndex.value = index
+  editingIptvData.value = { ...iptvUrlsObj.value[index] }
+}
+
+const saveEditedIptv = () => {
+  if (editingIptvIndex.value > -1) {
+    const oldUrl = iptvUrlsObj.value[editingIptvIndex.value].url
+    iptvUrlsObj.value[editingIptvIndex.value] = { ...editingIptvData.value }
+    if (activeIptvUrl.value === oldUrl) {
+      activeIptvUrl.value = editingIptvData.value.url
+    }
+    saveIptvSettings()
+    editingIptvIndex.value = -1
+  }
+}
+
+const cancelEditingIptv = () => {
+  editingIptvIndex.value = -1
+}
 
 // Profile refs
 const profileData = ref({
@@ -238,19 +468,100 @@ const profileData = ref({
   password: '',
   channelName: '',
   whatsappLink: '',
-  tiktokLink: ''
+  tiktokLink: '',
+  logoUrl: ''
 })
 const isUpdatingProfile = ref(false)
+
+// Logo Upload refs
+const logoInput = ref(null)
+const selectedLogoFile = ref(null)
+const isUploadingLogo = ref(false)
+
+const handleLogoSelect = (event) => {
+  const file = event.target.files[0]
+  if (file) {
+    selectedLogoFile.value = file
+  }
+}
+
+const uploadLogo = async () => {
+  if (!selectedLogoFile.value || isUploadingLogo.value) return
+  isUploadingLogo.value = true
+  
+  try {
+    const tokenObj = localStorage.getItem('fuchibol_user')
+    const token = tokenObj ? JSON.parse(tokenObj).token : ''
+    
+    const formData = new FormData()
+    formData.append('logo', selectedLogoFile.value)
+
+    const res = await fetch('/api/v1/channels/logo', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      profileData.value.logoUrl = data.logo_url
+      selectedLogoFile.value = null
+      if (logoInput.value) logoInput.value.value = ''
+      alert('Logo subido y optimizado a WebP exitosamente.')
+    } else {
+      alert('Hubo un error al subir el logo.')
+    }
+  } catch(e) {
+    console.error(e)
+    alert('Error de conexión al subir logo')
+  } finally {
+    isUploadingLogo.value = false
+  }
+}
 
 // Agenda refs
 const agendaEvents = ref([])
 const isSavingAgenda = ref(false)
 
+// Analytics refs
+const analyticsSummary = ref({
+  total_views: 0,
+  views_last_24h: 0,
+  top_countries: []
+})
+
+const fetchAnalytics = async () => {
+  try {
+    const tokenObj = localStorage.getItem('fuchibol_user')
+    const token = tokenObj ? JSON.parse(tokenObj).token : ''
+    const res = await fetch('/api/v1/analytics/summary', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      const data = await res.json()
+      analyticsSummary.value = {
+        total_views: data.total_views || 0,
+        views_last_24h: data.views_last_24h || 0,
+        top_countries: data.top_countries || []
+      }
+    }
+  } catch (err) {
+    console.error('Failed to fetch analytics', err)
+  }
+}
+
 // Followers refs
 const followers = ref([])
 
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  return new Date(dateStr).toLocaleDateString()
+}
+
 const addAgendaEvent = () => {
-  agendaEvents.value.push({
+  agendaEvents.value.unshift({
     flags: '',
     teams: '',
     time: '',
@@ -300,7 +611,6 @@ const updateProfile = async () => {
     const user = tokenObj ? JSON.parse(tokenObj) : null
     const token = user ? user.token : ''
     
-    // Update User Profile
     const userPayload = {
       username: profileData.value.username,
       email: profileData.value.email
@@ -318,7 +628,6 @@ const updateProfile = async () => {
       body: JSON.stringify(userPayload)
     })
     
-    // Update Channel Name & WhatsApp
     const resChannel = await fetch('/api/v1/channels/me', {
       method: 'PATCH',
       headers: {
@@ -338,14 +647,12 @@ const updateProfile = async () => {
         ...user, 
         username: data.user.username, 
         email: data.user.email,
-        token: data.token // Guarda el nuevo token
+        token: data.token
       }
       localStorage.setItem('fuchibol_user', JSON.stringify(updatedUser))
       currentUser.value = updatedUser
       profileData.value.password = ''
-      alert('Perfil y canal actualizados exitosamente.')
-      // Recargar la página para que el Chat y todo el sistema tome el nuevo token
-      window.location.reload()
+      alert('Perfil actualizado exitosamente.')
     } else {
       alert('Hubo un problema al actualizar algunos datos.')
     }
@@ -365,7 +672,7 @@ const logout = () => {
 
 const copyText = (text) => {
   navigator.clipboard.writeText(text)
-  alert('¡Copiado al portapapeles!')
+  alert('¡Copiado!')
 }
 
 const loadKey = async () => {
@@ -373,55 +680,39 @@ const loadKey = async () => {
     showKey.value = true
     return
   }
-
-  if (!confirm('No se puede revelar la clave actual porque se guarda de forma segura. ¿Deseas generar una nueva clave y usarla ahora?')) {
-    return
-  }
+  if (!confirm('Deseas generar una nueva clave de transmisión?')) return
 
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
-    
     const res = await fetch(`/api/v1/auth/rotate-stream-key`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
       const data = await res.json()
       streamKey.value = data.stream_key
       showKey.value = true
-      alert('Clave generada y cargada. Cópiala y configúrala en OBS.')
-    } else {
-      const data = await res.json()
-      alert('Error: ' + (data.detail || 'No se pudo generar la clave.'))
     }
   } catch (err) {
     console.error(err)
-    alert('Error al generar la clave.')
   }
 }
 
 const rotateKey = async () => {
-  if (!confirm('¿Seguro que deseas rotar la clave de transmisión? OBS se desconectará si estás transmitiendo.')) {
-    return
-  }
+  if (!confirm('¿Seguro que deseas rotar la clave? OBS se desconectará.')) return
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
-    
     const res = await fetch(`/api/v1/auth/rotate-stream-key`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
       const data = await res.json()
       streamKey.value = data.stream_key
       showKey.value = true
-      alert('Clave de transmisión rotada exitosamente.')
+      alert('Clave rotada exitosamente.')
     }
   } catch (err) {
     console.error(err)
@@ -448,9 +739,7 @@ const checkAccess = () => {
 const loadChannelSettings = async (token) => {
   try {
     const res = await fetch('/api/v1/channels/me', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
       const data = await res.json()
@@ -458,12 +747,20 @@ const loadChannelSettings = async (token) => {
       profileData.value.channelName = data.name
       profileData.value.whatsappLink = data.whatsapp_link || ''
       profileData.value.tiktokLink = data.tiktok_link || ''
+      profileData.value.logoUrl = data.logo_url || ''
       activeIptvUrl.value = data.active_iptv_url
+      
+      // Parse IPTV URLs (handle both old string-list and new object-list formats)
       try {
-        iptvUrls.value = JSON.parse(data.iptv_urls || "[]")
+        const raw = JSON.parse(data.iptv_urls || "[]")
+        iptvUrlsObj.value = raw.map(item => {
+          if (typeof item === 'string') return { url: item, name: 'Canal TV' }
+          return item
+        })
       } catch(e) {
-        iptvUrls.value = []
+        iptvUrlsObj.value = []
       }
+      
       try {
         agendaEvents.value = JSON.parse(data.agenda_events || "[]")
       } catch(e) {
@@ -479,12 +776,11 @@ const loadChannelSettings = async (token) => {
 const fetchFollowers = async (id, token) => {
   try {
     const res = await fetch(`/api/v1/channels/${id}/followers_list`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
-      followers.value = await res.json()
+      const data = await res.json()
+      followers.value = data || []
     }
   } catch (err) {
     console.error('Failed to load followers', err)
@@ -496,7 +792,7 @@ const saveIptvSettings = async () => {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
     
-    const res = await fetch('/api/v1/channels/me', {
+    await fetch('/api/v1/channels/me', {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -504,14 +800,11 @@ const saveIptvSettings = async () => {
       },
       body: JSON.stringify({
         active_iptv_url: activeIptvUrl.value,
-        iptv_urls: JSON.stringify(iptvUrls.value)
+        iptv_urls: JSON.stringify(iptvUrlsObj.value)
       })
     })
     
-    if (!res.ok) {
-      alert('Error al guardar la configuración de IPTV')
-    } else if (isRestreaming.value || isPausedByObs.value) {
-      // Si el decodificador está activo o pausado, lo reiniciamos con la nueva URL automáticamente
+    if (isRestreaming.value || isPausedByObs.value) {
       await startRestream()
     }
   } catch(e) {
@@ -521,9 +814,11 @@ const saveIptvSettings = async () => {
 
 const addIptvUrl = () => {
   const url = newIptvUrl.value.trim()
-  if (url && !iptvUrls.value.includes(url)) {
-    iptvUrls.value.push(url)
+  const name = newIptvName.value.trim() || 'Nuevo Canal'
+  if (url && !iptvUrlsObj.value.some(i => i.url === url)) {
+    iptvUrlsObj.value.push({ url, name })
     newIptvUrl.value = ''
+    newIptvName.value = ''
     if (!activeIptvUrl.value) {
       activeIptvUrl.value = url
     }
@@ -532,10 +827,10 @@ const addIptvUrl = () => {
 }
 
 const removeIptvUrl = (index) => {
-  const url = iptvUrls.value[index]
-  iptvUrls.value.splice(index, 1)
-  if (activeIptvUrl.value === url) {
-    activeIptvUrl.value = iptvUrls.value.length > 0 ? iptvUrls.value[0] : null
+  const item = iptvUrlsObj.value[index]
+  iptvUrlsObj.value.splice(index, 1)
+  if (activeIptvUrl.value === item.url) {
+    activeIptvUrl.value = iptvUrlsObj.value.length > 0 ? iptvUrlsObj.value[0].url : null
   }
   saveIptvSettings()
 }
@@ -543,13 +838,13 @@ const removeIptvUrl = (index) => {
 const checkRestreamStatus = async () => {
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
-    const token = tokenObj ? JSON.parse(tokenObj).token : ''
+    if (!tokenObj) return
+    const token = JSON.parse(tokenObj).token
     const res = await fetch('/api/v1/restream/status', {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
       const data = await res.json()
-      // Sincronizar con los campos correctos del backend
       isRestreaming.value = data.is_active_restream
       isPausedByObs.value = data.is_paused_by_obs
     }
@@ -566,24 +861,16 @@ const startRestream = async () => {
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
-    
     const res = await fetch('/api/v1/restream/start', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        iptv_url: activeIptvUrl.value
-      })
+      body: JSON.stringify({ iptv_url: activeIptvUrl.value })
     })
-    
     if (res.ok) {
       isRestreaming.value = true
-      await checkRestreamStatus()
-    } else {
-      const data = await res.json()
-      alert('Error: ' + data.detail)
     }
   } catch(e) {
     console.error(e)
@@ -598,16 +885,12 @@ const stopRestream = async () => {
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
-    
     const res = await fetch('/api/v1/restream/stop', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     })
-    
     if (res.ok) {
       isRestreaming.value = false
-      await checkRestreamStatus()
-      alert('Decodificador detenido.')
     }
   } catch(e) {
     console.error(e)
@@ -616,11 +899,10 @@ const stopRestream = async () => {
   }
 }
 
-import { onBeforeUnmount } from 'vue'
-
 onMounted(() => {
   serverUrl.value = getRtmpServerUrl()
   checkAccess()
+  fetchAnalytics()
   statusInterval = setInterval(checkRestreamStatus, 5000)
 })
 
@@ -630,328 +912,479 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
 .admin-layout {
-  display: flex;
-  flex-direction: column;
+  --bg-base:    #0d0f14;
+  --bg-surface: #111318;
+  --bg-card:    #161a22;
+  --border:     rgba(255,255,255,0.07);
+  --text-primary:   #ffffff;
+  --text-secondary: rgba(255,255,255,0.5);
+  --text-muted:     rgba(255,255,255,0.25);
+  --accent:     #00e676;
+  --accent-bg:  rgba(0,230,118,0.12);
+  --teal:       #1D9E75;
+  --teal-bg:    rgba(29,158,117,0.15);
+  --blue:       #378ADD;
+  --blue-bg:    rgba(55,138,221,0.15);
+  --purple:     #7F77DD;
+  --purple-bg:  rgba(127,119,221,0.15);
+  --red:        #f87171;
+  --red-bg:     rgba(239,68,68,0.08);
+  --red-border: rgba(239,68,68,0.3);
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   height: 100vh;
-  overflow-y: auto;
-  background-color: hsl(var(--bg-primary));
-}
-
-.navbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 24px;
-  border-radius: 0;
-  border-bottom: 1px solid hsla(var(--text-primary), 0.05);
-  height: 64px;
-}
-
-.logo {
-  font-size: 20px;
-  font-weight: 800;
-  text-decoration: none;
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.username-badge {
-  font-size: 14px;
-  font-weight: 600;
-  color: hsl(var(--primary));
-  margin-right: 16px;
-}
-
-.content-container {
-  padding: 40px;
-  max-width: 1000px;
-  margin: 0 auto;
+  height: 100dvh;
   width: 100%;
-}
-
-.admin-header h1 {
-  font-size: 24px;
-  margin-bottom: 24px;
-}
-
-.admin-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 24px;
-}
-
-.streamer-panel, .info-card {
-  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  overflow: hidden;
 }
 
-.panel-header {
+/* ─── MOBILE LAYOUT (default) ─── */
+.admin-layout {
+  max-width: 100%;
+  margin: 0;
+}
+.sidebar, .desktop-topbar {
+  display: none;
+}
+
+/* TOP BAR */
+.topbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border-bottom: 0.5px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
-
-.streamer-panel h3, .info-card h3 {
+.logo-row { display: flex; align-items: center; gap: 8px; }
+.logo-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.logo-text {
+  font-size: 14px; font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.08em;
+}
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.icon-btn {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
   font-size: 18px;
-  font-weight: 700;
+  transition: background 0.15s;
+}
+.icon-btn:hover { background: rgba(255,255,255,0.1); }
+.avatar-sm {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
 }
 
-.panel-desc {
-  font-size: 14px;
-  color: hsl(var(--text-secondary));
-}
-
-.key-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.key-field label {
-  font-size: 13px;
-  font-weight: 600;
-  color: hsl(var(--text-secondary));
-}
-
-.input-copy-group {
-  display: flex;
-  gap: 12px;
-}
-
-.input-copy-group input {
+/* MAIN SCROLL AREA */
+.main {
   flex: 1;
-  padding: 10px 14px;
-  font-size: 14px;
+  overflow-y: scroll;
+  padding-bottom: 80px;
+  min-height: 0;
 }
 
-.key-input {
-  font-family: monospace;
-  letter-spacing: 2px;
-}
+/* HERO */
+.hero { padding: 20px 16px 8px; }
+.hero-title { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.hero-sub { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
 
-.help-text {
-  font-size: 12px;
-  color: hsl(var(--text-muted));
-  margin-top: 4px;
-}
-
-.help-text code {
-  background: hsl(var(--bg-secondary));
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: hsl(var(--primary));
-}
-
-.danger-text {
-  color: hsl(var(--danger));
-  border-color: hsla(var(--danger), 0.2);
-}
-
-.danger-text:hover {
-  background: hsla(var(--danger), 0.1);
-  border-color: hsl(var(--danger));
-}
-
-.info-card p {
-  color: hsl(var(--text-secondary));
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-/* Profile Form Styles */
-.profile-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  font-weight: 600;
-  color: hsl(var(--text-secondary));
-}
-
-/* IPTV Manager Styles */
-.iptv-manager {
+.badge-live {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px; font-weight: 600;
   margin-top: 10px;
 }
-
-.restream-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
 }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-.status-badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 700;
+/* STAT GRID */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 16px 0;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+.stat-card.wide { grid-column: 1 / -1; }
+.stat-icon-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.stat-icon {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+}
+.stat-icon.teal  { background: var(--teal-bg);   color: var(--teal); }
+.stat-icon.blue  { background: var(--blue-bg);   color: var(--blue); }
+.stat-icon.purple{ background: var(--purple-bg); color: var(--purple); }
+.stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+.stat-value { font-size: 28px; font-weight: 600; color: var(--text-primary); line-height: 1.1; }
+.stat-delta { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 
-.status-badge.running {
-  background: hsla(var(--success), 0.2);
-  color: hsl(var(--success));
-  border: 1px solid hsla(var(--success), 0.5);
-  animation: pulse 2s infinite;
+/* INFO CARDS */
+.section { padding: 12px 16px 0; }
+.info-card {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 10px;
 }
-
-.status-badge.paused {
-  background: hsla(var(--warning), 0.2);
-  color: hsl(var(--warning));
-  border: 1px solid hsla(var(--warning), 0.5);
+.info-card-title {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
+.info-card-title i { font-size: 14px; }
 
-.status-badge.stopped {
-  background: hsla(0, 0%, 50%, 0.2);
-  color: hsl(var(--text-muted));
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 hsla(var(--success), 0.4); }
-  70% { box-shadow: 0 0 0 6px hsla(var(--success), 0); }
-  100% { box-shadow: 0 0 0 0 hsla(var(--success), 0); }
-}
-
-.iptv-add-form {
+.status-row {
   display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.iptv-add-form input {
-  flex: 1;
-}
-
-.iptv-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: hsla(0,0%,0%,0.2);
-  padding: 12px;
-  border-radius: 8px;
-}
-
-.iptv-item {
-  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 8px;
-  border-radius: 6px;
-  background: hsla(0,0%,100%,0.02);
-  border: 1px solid transparent;
-}
-
-.iptv-item.active {
-  border-color: hsla(var(--primary), 0.5);
-  background: hsla(var(--primary), 0.05);
-}
-
-.iptv-url-label {
-  flex: 1;
-  font-family: monospace;
+  padding: 9px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.05);
   font-size: 13px;
-  word-break: break-all;
-  cursor: pointer;
 }
+.status-row:last-child { border-bottom: none; }
+.status-label { color: var(--text-secondary); }
+.status-val { color: var(--text-primary); font-weight: 500; }
 
 .empty-state {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 20px 0; gap: 8px;
+}
+.empty-icon { font-size: 28px; color: rgba(255,255,255,0.1); }
+.empty-text {
+  font-size: 12px;
+  color: var(--text-muted);
   text-align: center;
-  padding: 20px;
-  color: hsl(var(--text-muted));
-  font-size: 14px;
-  font-style: italic;
-  background: hsla(0,0%,0%,0.2);
-  border-radius: 8px;
+  line-height: 1.6;
 }
 
-/* Agenda List Styles */
-.agenda-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.agenda-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: hsla(0,0%,0%,0.2);
+/* PUBLIC BUTTON */
+.btn-public {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 4px 16px 12px;
   padding: 12px;
-  border-radius: 8px;
-}
-
-.agenda-fields {
-  display: flex;
-  flex: 1;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.agenda-fields .input-field {
-  flex: 1;
-  min-width: 120px;
-}
-
-.agenda-fields .small-input {
-  flex: 0 0 80px;
-  min-width: 80px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: hsl(var(--text-secondary));
+  border-radius: var(--radius-lg);
+  background: var(--text-primary);
+  color: var(--bg-base);
+  font-size: 14px; font-weight: 600;
   cursor: pointer;
+  border: none;
+  width: calc(100% - 32px);
+  transition: opacity 0.15s;
 }
+.btn-public:hover { opacity: 0.88; }
+.btn-public i { font-size: 15px; }
 
-/* Followers List Styles */
-.followers-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-}
-
-.follower-item {
+/* BOTTOM NAV */
+.bottom-nav {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  background: hsla(0,0%,0%,0.2);
-  padding: 10px;
-  border-radius: 10px;
-  border: 1px solid hsla(var(--text-primary), 0.05);
+  border-top: 0.5px solid var(--border);
+  background: var(--bg-surface);
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  margin: 0;
+  z-index: 10;
 }
-
-.follower-avatar {
-  width: 32px;
-  height: 32px;
-  background: hsl(var(--primary));
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 14px;
+.nav-tab {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 10px 4px 8px;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-top: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  text-decoration: none;
 }
+.nav-tab i { font-size: 20px; }
+.nav-tab.active { color: var(--accent); border-top-color: var(--accent); }
+.nav-tab:hover:not(.active) { color: var(--text-secondary); }
 
-.follower-username {
-  font-size: 13px;
+/* Buttons & Inputs */
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg-base);
+  border: none;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
   font-weight: 600;
-  color: hsl(var(--text-primary));
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+
+.btn-secondary {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-primary);
+  border: 0.5px solid var(--border);
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-secondary:hover { background: rgba(255,255,255,0.1); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+.input-field {
+  width: 100%;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  outline: none;
+}
+.input-field:focus { border-color: var(--accent); }
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.input-copy-group { display: flex; gap: 8px; }
+
+/* Utilities */
+.w-full { width: 100%; }
+.mt-2 { margin-top: 8px; }
+.mt-4 { margin-top: 16px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-4 { margin-bottom: 16px; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.danger-text { color: var(--red); }
+.btn-icon { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: var(--radius-md); }
+.btn-icon:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+.btn-icon.danger:hover { color: var(--red); background: var(--red-bg); }
+
+/* Forms */
+.form-grid { display: flex; flex-direction: column; gap: 16px; }
+.divider { height: 1px; background: var(--border); margin: 24px 0; }
+
+/* Toggle Switch */
+.toggle-switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.toggle-switch input { display: none; }
+.toggle-switch .slider { width: 36px; height: 18px; background: rgba(255,255,255,0.1); border-radius: 20px; position: relative; transition: 0.3s; }
+.toggle-switch .slider:after { content: ''; position: absolute; width: 14px; height: 14px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: 0.3s; }
+.toggle-switch input:checked + .slider { background: var(--accent); }
+.toggle-switch input:checked + .slider:after { left: 20px; }
+.toggle-switch .label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.toggle-switch input:checked ~ .label { color: var(--accent); }
+
+/* IPTV Styles */
+.iptv-item-new {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+.iptv-item-new.active { border-color: var(--accent); background: var(--accent-bg); }
+.item-details { flex: 1; cursor: pointer; overflow: hidden; }
+.item-name { display: block; font-size: 13px; font-weight: 600; }
+.item-url { display: block; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Logo Upload */
+.logo-preview-container { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.1); padding: 12px; border-radius: var(--radius-md); border: 1px dashed var(--border); }
+.logo-preview, .logo-placeholder { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; }
+.logo-placeholder { background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-secondary); }
+.hidden-input { display: none; }
+.file-name-hint { display: block; margin-top: 6px; font-size: 11px; color: var(--accent); }
+
+/* Badges */
+.status-badge { font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+.status-badge.running { background: var(--accent-bg); color: var(--accent); }
+.status-badge.paused { background: var(--purple-bg); color: var(--purple); }
+.status-badge.stopped { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+
+/* ─── DESKTOP LAYOUT ─── */
+@media (min-width: 768px) {
+  .admin-layout {
+    max-width: 100%;
+    flex-direction: row;
+    height: 100vh;
+  }
+
+  /* Show sidebar, hide bottom nav */
+  .bottom-nav { display: none; }
+  .main { padding-bottom: 0; }
+
+  .sidebar {
+    display: flex !important;
+    flex-direction: column;
+    width: 220px;
+    min-width: 220px;
+    background: var(--bg-surface);
+    border-right: 0.5px solid var(--border);
+    height: 100vh;
+    position: sticky;
+    top: 0;
+  }
+  .sidebar-logo {
+    display: flex; align-items: center; gap: 10px;
+    padding: 20px 20px 22px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .sidebar-logo .logo-dot { width: 10px; height: 10px; }
+  .sidebar-logo .logo-text { font-size: 15px; }
+  .sidebar-nav { padding: 14px 12px; flex: 1; }
+  .sidebar-nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    border-radius: var(--radius-md);
+    font-size: 13.5px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    margin-bottom: 2px;
+    transition: background 0.15s, color 0.15s;
+    text-decoration: none;
+  }
+  .sidebar-nav-item i { font-size: 17px; }
+  .sidebar-nav-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
+  .sidebar-nav-item.active { background: var(--accent-bg); color: var(--accent); }
+
+  .sidebar-footer {
+    border-top: 0.5px solid var(--border);
+    padding: 16px 18px;
+  }
+  .user-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .user-name { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+  .user-role { font-size: 11px; color: var(--accent); letter-spacing: 0.04em; }
+  .btn-logout {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    border: 0.5px solid var(--red-border);
+    color: var(--red);
+    font-size: 13px;
+    cursor: pointer;
+    background: transparent;
+    width: 100%;
+    transition: background 0.15s;
+  }
+  .btn-logout:hover { background: var(--red-bg); }
+
+  /* Desktop main area */
+  .topbar { display: none; }
+
+  .main {
+    flex: 1;
+    background: var(--bg-base);
+    overflow-y: scroll;
+    height: 100vh;
+  }
+
+  .desktop-topbar {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 28px 28px 0;
+    margin-bottom: 24px;
+  }
+  .desktop-title { font-size: 24px; font-weight: 600; color: var(--text-primary); }
+  .desktop-sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+  .btn-public-desktop {
+    display: flex !important; align-items: center; gap: 8px;
+    padding: 10px 18px;
+    border-radius: var(--radius-md);
+    background: var(--text-primary);
+    color: var(--bg-base);
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+    height: fit-content;
+  }
+  .btn-public-desktop:hover { opacity: 0.88; }
+
+  /* Desktop stats: 3 columns */
+  .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 0 28px;
+    margin-bottom: 6px;
+  }
+  .stat-card.wide { grid-column: auto; }
+
+  /* Desktop bottom cards: 2 columns */
+  .bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding: 14px 28px 28px;
+  }
+  .bottom-grid .info-card { margin-bottom: 0; }
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  
+  .section { padding: 0 28px; }
+
+  /* Hide mobile elements on desktop */
+  .hero { display: none; }
+  .btn-public { display: none; }
 }
 </style>

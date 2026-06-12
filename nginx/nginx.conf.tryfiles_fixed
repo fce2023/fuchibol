@@ -52,12 +52,6 @@ http {
             proxy_set_header Host $host;
         }
 
-        location /rtc/ {
-            proxy_pass http://srs:1985/rtc/;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-        }
-
         location /ws/ {
             proxy_pass http://backend:8000;
             proxy_http_version 1.1;
@@ -66,40 +60,17 @@ http {
             proxy_set_header Host $host;
         }
 
-        location /hls/ {
-            alias /usr/share/nginx/html/hls/;
+        # Unified HLS serving
+        location /hls {
+            root /usr/share/nginx/html;
             add_header Access-Control-Allow-Origin * always;
 
-            # Dedicated Master Link for OLT
-            location = /hls/live/master.m3u8 {
-                add_header Cache-Control "no-cache, no-store, must-revalidate";
-                add_header Access-Control-Allow-Origin * always;
-                # Priority: OBS (channel_1) > IPTV (iptv_1) > Offline
-                try_files /hls/live/channel_1.m3u8 /hls/live/iptv_1.m3u8 /hls/offline/offline.m3u8 =404;
-            }
-
-            # Compatibility link (the one user asked for)
+            # The Master Link for OLT
             location = /hls/live/channel_1.m3u8 {
                 add_header Cache-Control "no-cache, no-store, must-revalidate";
                 add_header Access-Control-Allow-Origin * always;
-                # Try OBS first, then IPTV
                 try_files /hls/live/channel_1.m3u8 /hls/live/iptv_1.m3u8 /hls/offline/offline.m3u8 =404;
             }
-
-            location ~* \.m3u8$ {
-                add_header Cache-Control "no-cache, no-store, must-revalidate";
-                add_header Access-Control-Allow-Origin * always;
-            }
-
-            location ~* \.ts$ {
-                add_header Cache-Control "public, max-age=3600";
-                add_header Access-Control-Allow-Origin * always;
-            }
-        }
-
-        location /hls/offline/ {
-            alias /usr/share/nginx/html/offline/;
-            add_header Access-Control-Allow-Origin * always;
 
             location ~* \.m3u8$ {
                 add_header Cache-Control "no-cache, no-store, must-revalidate";

@@ -32,6 +32,7 @@ type Channel struct {
 	KeyExpiresAt     time.Time      `gorm:"not null" json:"-"`
 	IsLive           bool           `gorm:"default:false;not null;index:idx_channels_is_live_category" json:"is_live"`
 	SlowmodeSeconds  int            `gorm:"default:0;not null" json:"slowmode_seconds"`
+	ActiveStreamName string         `gorm:"size:255" json:"active_stream_name"`
 	UpdatedAt        time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
 	
 	// IPTV fields
@@ -45,6 +46,7 @@ type Channel struct {
 	// Social
 	WhatsappLink     *string        `json:"whatsapp_link"`
 	TiktokLink       *string        `json:"tiktok_link"`
+	LogoUrl          *string        `json:"logo_url"`
 	
 	// Relationships
 	User             *User          `gorm:"foreignKey:UserID" json:"user,omitempty"`
@@ -120,4 +122,15 @@ type BlockedTerm struct {
 	
 	// Relationships
 	Creator          *User          `gorm:"foreignKey:CreatedBy" json:"creator,omitempty"`
+}
+
+// AnalyticsLog model to track views and traffic
+type AnalyticsLog struct {
+	ID        uint      `gorm:"primaryKey;index" json:"id"`
+	ChannelID uint      `gorm:"not null;index" json:"channel_id"`
+	IPAddress string    `gorm:"size:45" json:"ip_address"`
+	Country   string    `gorm:"size:100" json:"country"`
+	City      string    `gorm:"size:100" json:"city"`
+	UserAgent string    `gorm:"type:text" json:"user_agent"`
+	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP;index" json:"created_at"`
 }
