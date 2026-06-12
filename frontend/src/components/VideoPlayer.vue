@@ -195,9 +195,9 @@ const initPlayer = async () => {
       rtcConnection.ontrack = (event) => {
         targetVideoEl.srcObject = event.streams[0]
         
-        // Prioritize stability: set playoutDelayHint to 1.0 second to buffer incoming jitter
+        // Prioritize stability: set playoutDelayHint to 2.0 seconds to buffer incoming jitter
         if (event.receiver && 'playoutDelayHint' in event.receiver) {
-          event.receiver.playoutDelayHint = 1.0
+          event.receiver.playoutDelayHint = 2.0
         }
       }
 
