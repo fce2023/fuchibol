@@ -2,11 +2,21 @@
   <div class="player-container" :class="{ 'is-loading': isLoading && isLive }" @mouseenter="showControls = true" @mouseleave="showControls = false">
     <div class="player-aspect-ratio">
       <video 
-        ref="videoRef" 
+        ref="videoRefA" 
         class="video-element" 
+        :class="{ 'active': activeVideo === 'A' }"
         playsinline
         webkit-playsinline
-        controls
+        :controls="activeVideo === 'A' && showControls"
+      ></video>
+
+      <video 
+        ref="videoRefB" 
+        class="video-element" 
+        :class="{ 'active': activeVideo === 'B' }"
+        playsinline
+        webkit-playsinline
+        :controls="activeVideo === 'B' && showControls"
       ></video>
 
       <!-- Selector de Calidad (ABR) -->
@@ -59,65 +69,142 @@ const props = defineProps({
   isLive: {
     type: Boolean,
     default: false
+  },
+  channelId: {
+    type: [Number, String],
+    default: null
   }
 })
 
-const videoRef = ref(null)
+const videoRefA = ref(null)
+const videoRefB = ref(null)
+const activeVideo = ref(null) // 'A' or 'B' or null
 const hasError = ref(false)
 const isLoading = ref(true)
 const showControls = ref(false)
 const qualities = ref([])
 const currentQuality = ref(-1)
 
-let hlsInstance = null
-let rtcConnection = null
-let retryTimer = null
+let hasTracked = false
+
+// Track player structures
+const players = {
+  A: { hls: null, rtc: null, retryTimer: null, playingListener: null },
+  B: { hls: null, rtc: null, retryTimer: null, playingListener: null }
+}
+
+const trackView = async () => {
+  if (!props.channelId || hasTracked) return
+  try {
+    await fetch('/api/v1/analytics/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel_id: parseInt(props.channelId) })
+    })
+    hasTracked = true
+  } catch (e) {
+    console.error("Tracking error:", e)
+  }
+}
 
 const changeQuality = () => {
-  if (hlsInstance) {
-    hlsInstance.currentLevel = currentQuality.value;
+  const active = activeVideo.value
+  if (active && players[active].hls) {
+    players[active].hls.currentLevel = currentQuality.value;
+  }
+}
+
+const destroyPlayerInstance = (key) => {
+  const player = players[key]
+  if (player.hls) {
+    player.hls.destroy()
+    player.hls = null
+  }
+  if (player.rtc) {
+    player.rtc.close()
+    player.rtc = null
+  }
+  if (player.retryTimer) {
+    clearTimeout(player.retryTimer)
+    player.retryTimer = null
+  }
+  const video = key === 'A' ? videoRefA.value : videoRefB.value
+  if (video) {
+    if (player.playingListener) {
+      video.removeEventListener('playing', player.playingListener)
+      player.playingListener = null
+    }
+    video.srcObject = null
+    video.removeAttribute('src')
+    video.load()
   }
 }
 
 const initPlayer = async () => {
-  if (retryTimer) {
-    clearTimeout(retryTimer)
-    retryTimer = null
-  }
-
   if (!props.isLive || !props.streamUrl) {
-    destroyPlayer()
+    destroyPlayerInstance('A')
+    destroyPlayerInstance('B')
+    activeVideo.value = null
     isLoading.value = false
     return
   }
 
-  const video = videoRef.value
-  if (!video) return
+  // Determine target video container (crossfade target)
+  const targetKey = activeVideo.value === 'A' ? 'B' : 'A'
+  const targetVideoEl = targetKey === 'A' ? videoRefA.value : videoRefB.value
+  if (!targetVideoEl) return
 
-  destroyPlayer()
+  // Clean up any stale setups on the target container before loading
+  destroyPlayerInstance(targetKey)
   hasError.value = false
-  isLoading.value = true
-  qualities.value = []
-  currentQuality.value = -1
-  let isFirstPlay = true
+
+  // If there is no active video yet, we show loading screen
+  if (!activeVideo.value) {
+    isLoading.value = true
+  }
+
+  hasTracked = false
+
+  // Set up playing event listener to trigger the crossfade transition
+  players[targetKey].playingListener = () => {
+    // Transition active reference
+    const oldKey = activeVideo.value
+    activeVideo.value = targetKey
+    isLoading.value = false
+
+    trackView()
+
+    // Destroy old player resources after transition fades out
+    if (oldKey && oldKey !== targetKey) {
+      setTimeout(() => {
+        destroyPlayerInstance(oldKey)
+      }, 600)
+    }
+  }
+  targetVideoEl.addEventListener('playing', players[targetKey].playingListener)
 
   // === WEBRTC LOGIC (OBS) ===
   if (props.streamUrl.startsWith('webrtc://')) {
     try {
-      rtcConnection = new RTCPeerConnection()
+      const rtcConnection = new RTCPeerConnection()
+      players[targetKey].rtc = rtcConnection
+
       rtcConnection.addTransceiver("audio", {direction: "recvonly"})
       rtcConnection.addTransceiver("video", {direction: "recvonly"})
 
       rtcConnection.ontrack = (event) => {
-        video.srcObject = event.streams[0]
+        targetVideoEl.srcObject = event.streams[0]
+        
+        // Prioritize stability: set playoutDelayHint to 1.0 second to buffer incoming jitter
+        if (event.receiver && 'playoutDelayHint' in event.receiver) {
+          event.receiver.playoutDelayHint = 1.0
+        }
       }
 
       const offer = await rtcConnection.createOffer()
       await rtcConnection.setLocalDescription(offer)
 
-      // El proxy de Nginx mapeará /rtc/ a SRS
-      const apiUrl = "https://fuchibol.elconsejosupremo.com/rtc/v1/play/"
-      
+      const apiUrl = window.location.origin + "/rtc/v1/play/"
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -138,28 +225,29 @@ const initPlayer = async () => {
         sdp: data.sdp
       }))
 
-      isLoading.value = false
-      video.play().catch(e => console.log("Autoplay blocked"))
-      
+      targetVideoEl.play().catch(e => console.log("Autoplay blocked"))
+
       rtcConnection.oniceconnectionstatechange = () => {
         if (rtcConnection && (rtcConnection.iceConnectionState === 'disconnected' || rtcConnection.iceConnectionState === 'failed')) {
-          hasError.value = true
-          isLoading.value = false
-          retryTimer = setTimeout(initPlayer, 3000)
+          if (activeVideo.value === targetKey) {
+            hasError.value = true
+          }
+          players[targetKey].retryTimer = setTimeout(initPlayer, 3000)
         }
       }
     } catch (err) {
       console.error("WebRTC Error:", err)
-      hasError.value = true
-      isLoading.value = false
-      retryTimer = setTimeout(initPlayer, 3000)
+      if (activeVideo.value === targetKey || !activeVideo.value) {
+        hasError.value = true
+      }
+      players[targetKey].retryTimer = setTimeout(initPlayer, 3000)
     }
     return
   }
 
   // === HLS LOGIC (IPTV PROXY) ===
   if (Hls.isSupported()) {
-    hlsInstance = new Hls({
+    const hlsInstance = new Hls({
       maxBufferLength: 30, // Mayor buffer para absorber cortes
       maxMaxBufferLength: 60,
       enableWorker: true,
@@ -171,20 +259,17 @@ const initPlayer = async () => {
       capLevelToPlayerSize: true,
       abrEwmaDefaultEstimate: 500000,
     })
+    players[targetKey].hls = hlsInstance
 
     hlsInstance.loadSource(props.streamUrl)
-    hlsInstance.attachMedia(video)
+    hlsInstance.attachMedia(targetVideoEl)
 
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-      isLoading.value = false
       // Cargar calidades disponibles para el ABR
       if (data.levels && data.levels.length > 0) {
         qualities.value = data.levels.map(l => ({ height: l.height, bitrate: l.bitrate }))
       }
-      if (isFirstPlay) {
-        video.play().catch(e => console.log("Autoplay blocked, waiting for interaction"))
-        isFirstPlay = false
-      }
+      targetVideoEl.play().catch(e => console.log("Autoplay blocked, waiting for interaction"))
     })
 
     hlsInstance.on(Hls.Events.ERROR, (event, data) => {
@@ -204,56 +289,39 @@ const initPlayer = async () => {
         }
 
         // Si es otro error fatal, mostramos pantalla de error
-        hasError.value = true
-        isLoading.value = false
-        retryTimer = setTimeout(initPlayer, 3000)
+        if (activeVideo.value === targetKey || !activeVideo.value) {
+          hasError.value = true
+        }
+        players[targetKey].retryTimer = setTimeout(initPlayer, 3000)
       }
     })
 
     // Detener la descarga de fragmentos si el usuario pone pausa
-    video.addEventListener('pause', () => {
+    targetVideoEl.addEventListener('pause', () => {
       if (hlsInstance) {
         hlsInstance.stopLoad()
       }
     })
 
     // Reanudar la descarga y forzar la sincronización al en vivo si da play
-    video.addEventListener('play', () => {
+    targetVideoEl.addEventListener('play', () => {
       if (hlsInstance) {
         hlsInstance.startLoad()
       }
     })
 
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = props.streamUrl
-    video.addEventListener('loadedmetadata', () => {
-      isLoading.value = false
-      video.play()
+  } else if (targetVideoEl.canPlayType('application/vnd.apple.mpegurl')) {
+    targetVideoEl.src = props.streamUrl
+    targetVideoEl.addEventListener('loadedmetadata', () => {
+      targetVideoEl.play().catch(e => console.log("Autoplay blocked"))
     })
-    video.addEventListener('error', handleNativeError)
   }
-}
-
-const handleNativeError = (e) => {
-  console.warn("Native video error (Ignored, relying on hls.js for recovery):", e)
 }
 
 const destroyPlayer = () => {
-  if (hlsInstance) {
-    hlsInstance.destroy()
-    hlsInstance = null
-  }
-  if (rtcConnection) {
-    rtcConnection.close()
-    rtcConnection = null
-  }
-  const video = videoRef.value
-  if (video) {
-    video.srcObject = null
-    video.removeAttribute('src')
-    video.load()
-    video.removeEventListener('error', handleNativeError)
-  }
+  destroyPlayerInstance('A')
+  destroyPlayerInstance('B')
+  activeVideo.value = null
 }
 
 watch([() => props.streamUrl, () => props.isLive], (newVals, oldVals) => {
@@ -269,7 +337,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   destroyPlayer()
-  if (retryTimer) clearTimeout(retryTimer)
 })
 </script>
 
@@ -297,6 +364,14 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   background: #000;
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+  pointer-events: none;
+}
+
+.video-element.active {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .overlay {
