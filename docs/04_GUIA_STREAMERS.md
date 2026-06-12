@@ -23,7 +23,9 @@ Para asegurar la menor latencia posible y evitar cortes por saturación, ve a la
     *   Para 720p 60fps: `4500 Kbps`
     *   Para 720p 30fps: `3000 Kbps`
 *   **Intervalo de Fotogramas Clave (Keyframe Interval):** `2 s` (¡MUY IMPORTANTE para WebRTC y HLS de baja latencia!).
-*   **Perfil (Profile):** `main` o `high`.
+*   **Perfil (Profile):** `baseline` (para máxima compatibilidad con WebRTC) o `main`.
+*   **Sintonización (Tune):** `zerolatency` (¡CRÍTICO para evitar lag/retraso en WebRTC!).
+*   **Fotogramas B Máximos (Max B-frames):** `0` (¡CRÍTICO! Los B-frames no se soportan en tiempo real en WebRTC y causan tirones y saltos visuales).
 
 ## Consideraciones sobre los Cortes de Señal
 En el servidor se han optimizado los *buffers* de Nginx y del servidor SRS para evitar micro-desconexiones. Sin embargo, el streamer debe asegurarse de no emitir a un Bitrate mayor al que soporta su velocidad de **Subida** (Upload speed) de Internet.
