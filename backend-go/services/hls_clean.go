@@ -148,3 +148,21 @@ func CleanHLSReady(streamName string) bool {
 	info, err := os.Stat(fmt.Sprintf("%s/%s.m3u8", CleanHLSDir, streamName))
 	return err == nil && info.Size() > 0
 }
+
+// CleanHLSFresh reports whether the clean playlist exists AND is still being
+// updated by a live ffmpeg (mtime within a few target durations). A merely
+// existing playlist is not enough: StopCleanHLS leaves files on disk on
+// purpose, so after a stream ends a stale playlist survives and — if served —
+// freezes the player forever (it keeps polling a manifest that never advances).
+func CleanHLSFresh(streamName string) bool {
+	if streamName == "" {
+		return false
+	}
+	info, err := os.Stat(fmt.Sprintf("%s/%s.m3u8", CleanHLSDir, streamName))
+	if err != nil || info.Size() == 0 {
+		return false
+	}
+	// 5x hls_time (2s): generous enough for jitter, strict enough that a dead
+	// pipeline is detected within seconds.
+	return time.Since(info.ModTime()) < 10*time.Second
+}

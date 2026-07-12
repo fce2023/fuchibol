@@ -238,11 +238,11 @@
                   :value="formattedStreamKey || '••••••••••••••••••••••••••••••••'" 
                   class="input-field key-input" 
                 />
-                <button @click="showKey = !showKey" class="btn btn-secondary btn-sm">
-                  {{ showKey ? 'Ocultar' : 'Ver' }}
+                <button @click="toggleKey" class="btn btn-secondary btn-sm">
+                  {{ showKey && formattedStreamKey ? 'Ocultar' : 'Ver' }}
                 </button>
                 <button v-if="formattedStreamKey" @click="copyText(formattedStreamKey)" class="btn btn-secondary btn-sm">Copiar</button>
-                <button v-else @click="loadKey" class="btn btn-primary btn-sm">Revelar</button>
+                <button @click="rotateKey" class="btn btn-primary btn-sm">Rotar</button>
               </div>
             </div>
           </div>
@@ -805,28 +805,42 @@ const copyText = (text) => {
   alert('¡Copiado!')
 }
 
+// loadKey reveals the EXISTING key (GET, non-destructive). Legacy channels
+// without a stored plaintext copy get needs_rotation=true → we offer to rotate.
 const loadKey = async () => {
   if (streamKey.value) {
     showKey.value = true
     return
   }
-  if (!confirm('Deseas generar una nueva clave de transmisión?')) return
-
   try {
     const tokenObj = localStorage.getItem('fuchibol_user')
     const token = tokenObj ? JSON.parse(tokenObj).token : ''
-    const res = await fetch(`/api/v1/auth/rotate-stream-key`, {
-      method: 'POST',
+    const res = await fetch(`/api/v1/auth/stream-key`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
       const data = await res.json()
+      if (data.needs_rotation) {
+        if (confirm('Esta clave se creó antes de poder mostrarse. ¿Generar una clave nueva para poder verla? (OBS se desconectará)')) {
+          await rotateKey()
+        }
+        return
+      }
       streamKey.value = data.stream_key
       showKey.value = true
     }
   } catch (err) {
     console.error(err)
   }
+}
+
+// toggleKey drives the "Ver"/"Ocultar" button: fetch first if not loaded.
+const toggleKey = async () => {
+  if (!streamKey.value) {
+    await loadKey()
+    return
+  }
+  showKey.value = !showKey.value
 }
 
 const rotateKey = async () => {

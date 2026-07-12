@@ -147,15 +147,20 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 			if channel.ActiveStreamName != "" {
 				cleanName = channel.ActiveStreamName
 			}
-			// Lazily (re)start the OBS clean pipeline if needed.
-			if !services.CleanHLSReady(cleanName) {
+			// Lazily (re)start the OBS clean pipeline if needed. Freshness (not
+			// mere existence) is the signal: a stale playlist means the previous
+			// ffmpeg died and a new one must be launched.
+			if !services.CleanHLSFresh(cleanName) {
 				services.StartCleanHLS(cleanName)
 			}
 		}
 
-		// Prefer the clean playlist (SEI-stripped, plain sequence, absolute URLs).
+		// Prefer the clean playlist (SEI-stripped, plain sequence, absolute URLs)
+		// — but only while it's actively advancing. A stale leftover from a
+		// finished stream would freeze the receiver and shadow the IPTV fallback.
 		cleanPath := fmt.Sprintf("%s/%s.m3u8", services.CleanHLSDir, cleanName)
-		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 {
+		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 &&
+			services.CleanHLSFresh(cleanName) {
 			lines := strings.Split(string(contentBytes), "\n")
 			for i, line := range lines {
 				t := strings.TrimSpace(line)
@@ -200,14 +205,17 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 		// Prefer the clean HLS (SEI stripped) that plays on Chromecast/Smart TV.
 		// If the backend restarted while OBS was already live, lazily (re)start
 		// the ffmpeg — it's idempotent — and fall back to raw SRS meanwhile.
-		if !services.CleanHLSReady(streamName) {
+		// Freshness (not existence) gates both: a stale playlist left by a
+		// previous session must neither suppress the restart nor be served.
+		if !services.CleanHLSFresh(streamName) {
 			services.StartCleanHLS(streamName)
 		}
 
 		cleanPath := fmt.Sprintf("%s/%s.m3u8", services.CleanHLSDir, streamName)
 		rawPath := fmt.Sprintf("/app/srs_hls/live/%s.m3u8", streamName)
 
-		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 {
+		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 &&
+			services.CleanHLSFresh(streamName) {
 			rawPlaylist = string(contentBytes)
 			obsSegmentPrefix = baseURL + "/hls/live_clean/"
 		} else if contentBytes, fileErr := os.ReadFile(rawPath); fileErr == nil {

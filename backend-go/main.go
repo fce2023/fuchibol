@@ -64,6 +64,7 @@ func main() {
 	auth.Post("/login", controllers.Login)
 	auth.Get("/me", controllers.Me)
 	auth.Patch("/me", controllers.UpdateMe)
+	auth.Get("/stream-key", controllers.GetStreamKey)
 	auth.Post("/rotate-stream-key", controllers.RotateStreamKey)
 
 	// Channels Routes

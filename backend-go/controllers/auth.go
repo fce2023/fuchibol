@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -33,6 +35,52 @@ func generateStreamKey() string {
 func HashStreamKey(key string) string {
 	hash := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(hash[:])
+}
+
+// streamKeyCipher derives a 32-byte AES key from SECRET_KEY so the stream key
+// can be stored reversibly (unlike the auth hash) and revealed to its owner.
+func streamKeyCipher() (cipher.AEAD, error) {
+	sum := sha256.Sum256(jwtSecret)
+	block, err := aes.NewCipher(sum[:])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(block)
+}
+
+// EncryptStreamKey seals the raw key (nonce prepended, hex-encoded).
+func EncryptStreamKey(raw string) string {
+	gcm, err := streamKeyCipher()
+	if err != nil {
+		return ""
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return ""
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(raw), nil)
+	return hex.EncodeToString(sealed)
+}
+
+// DecryptStreamKey reverses EncryptStreamKey; returns "" if empty or tampered.
+func DecryptStreamKey(enc string) string {
+	if enc == "" {
+		return ""
+	}
+	gcm, err := streamKeyCipher()
+	if err != nil {
+		return ""
+	}
+	data, err := hex.DecodeString(enc)
+	if err != nil || len(data) < gcm.NonceSize() {
+		return ""
+	}
+	nonce, ct := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return ""
+	}
+	return string(plain)
 }
 
 // ExtractUserID helper to parse JWT from Authorization header
@@ -96,6 +144,7 @@ func Register(c *fiber.Ctx) error {
 		UserID:        user.ID,
 		Name:          user.Username + " Channel",
 		StreamKeyHash: HashStreamKey(rawKey),
+		StreamKeyEnc:  EncryptStreamKey(rawKey),
 		KeyExpiresAt:  time.Now().AddDate(0, 3, 0), // 90 days
 		UpdatedAt:     time.Now(),
 	}
@@ -170,12 +219,38 @@ func RotateStreamKey(c *fiber.Ctx) error {
 
 	rawKey := generateStreamKey()
 	channel.StreamKeyHash = HashStreamKey(rawKey)
+	channel.StreamKeyEnc = EncryptStreamKey(rawKey)
 	channel.KeyExpiresAt = time.Now().AddDate(0, 3, 0) // 90 days
 
 	database.DB.Save(channel)
 
 	return c.JSON(fiber.Map{
 		"stream_key": rawKey,
+		"expires_at": channel.KeyExpiresAt,
+	})
+}
+
+// GetStreamKey reveals the current raw stream key to its owner by decrypting
+// the stored copy. Legacy channels without an encrypted copy return
+// needs_rotation=true so the UI can prompt the user to generate a fresh one.
+func GetStreamKey(c *fiber.Ctx) error {
+	userID := ExtractUserID(c)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	channel, err := GetOrCreateChannel(userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Channel not found"})
+	}
+
+	raw := DecryptStreamKey(channel.StreamKeyEnc)
+	if raw == "" {
+		return c.JSON(fiber.Map{"stream_key": "", "needs_rotation": true})
+	}
+
+	return c.JSON(fiber.Map{
+		"stream_key": raw,
 		"expires_at": channel.KeyExpiresAt,
 	})
 }
@@ -199,6 +274,7 @@ func GetOrCreateChannel(userID uint) (*models.Channel, error) {
 		UserID:        userID,
 		Name:          user.Username + " Channel",
 		StreamKeyHash: HashStreamKey(rawKey),
+		StreamKeyEnc:  EncryptStreamKey(rawKey),
 		KeyExpiresAt:  time.Now().AddDate(0, 3, 0), // 90 days
 		UpdatedAt:     time.Now(),
 	}

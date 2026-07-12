@@ -29,6 +29,11 @@ type Channel struct {
 	Description      *string        `json:"description"`
 	Category         *string        `json:"category"`
 	StreamKeyHash    string         `gorm:"uniqueIndex;not null" json:"-"`
+	// StreamKeyEnc stores the raw key AES-GCM-encrypted so the owner can reveal
+	// it later (for OBS setup). The hash above stays the source of truth for
+	// webhook auth; this is only for display. Empty on legacy channels created
+	// before this field existed — those must rotate to obtain a revealable key.
+	StreamKeyEnc     string         `gorm:"type:text" json:"-"`
 	KeyExpiresAt     time.Time      `gorm:"not null" json:"-"`
 	IsLive           bool           `gorm:"default:false;not null;index:idx_channels_is_live_category" json:"is_live"`
 	SlowmodeSeconds  int            `gorm:"default:0;not null" json:"slowmode_seconds"`

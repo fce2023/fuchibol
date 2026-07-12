@@ -429,6 +429,18 @@ const loadMediaToSession = (session) => {
   mediaInfo.metadata = metadata
   mediaInfo.streamType = window.chrome.cast.media.StreamType.LIVE
 
+  // El Default Media Receiver hace "probing" del formato de segmento si no se
+  // lo declaramos: reproduce el buffer inicial (~3 segmentos) y luego se queda
+  // atascado en BUFFERING al continuar el live. Nuestros segmentos son MPEG-TS
+  // (ffmpeg -hls_segment_type mpegts), así que se lo indicamos explícitamente
+  // para que continúe recargando el manifiesto y descargando segmentos nuevos.
+  if (window.chrome.cast.media.HlsSegmentFormat) {
+    mediaInfo.hlsSegmentFormat = window.chrome.cast.media.HlsSegmentFormat.TS
+  }
+  if (window.chrome.cast.media.HlsVideoSegmentFormat) {
+    mediaInfo.hlsVideoSegmentFormat = window.chrome.cast.media.HlsVideoSegmentFormat.MPEG2_TS
+  }
+
   const req = new window.chrome.cast.media.LoadRequest(mediaInfo)
   req.autoplay = true
   session.loadMedia(req).then(
