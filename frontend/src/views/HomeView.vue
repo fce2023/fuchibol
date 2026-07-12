@@ -50,6 +50,66 @@
         </button>
       </div>
 
+      <!-- Cast to TV Button -->
+      <div v-if="channelInfo.is_live" style="display: flex; align-items: center; gap: 10px; padding: 8px 0 4px 0;">
+        <button @click="triggerCastTV" :class="isCasting ? 'cast-tv-btn active' : 'cast-tv-btn'">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+            <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+          </svg>
+          {{ isCasting ? 'Transmitiendo en TV...' : 'Ver en Smart TV' }}
+        </button>
+      </div>
+
+      <!-- Mobile Donations and Ranking Block -->
+      <div class="hide-desktop">
+        <!-- Donations Panel -->
+        <div v-if="channelInfo && (channelInfo.yape_number || channelInfo.paypal_link)" class="donations-panel" style="margin-top: 16px; padding: 14px; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+          <div style="font-size: 11px; font-weight: 700; color: #606080; letter-spacing: 0.5px; margin-bottom: 10px; text-transform: uppercase;">Apoya el Canal (Donaciones)</div>
+          <div v-if="channelInfo.donation_message" style="font-size: 13px; color: #c0c0d8; margin-bottom: 8px; line-height: 1.5; white-space: pre-line;">
+            <span>{{ channelInfo.donation_message }}</span>
+            <button v-if="channelInfo.donation_long_message" @click="isDonationExpanded = !isDonationExpanded" style="background: none; border: none; color: #00e87a; font-weight: 600; cursor: pointer; margin-left: 6px; padding: 0; font-size: 13px; text-decoration: underline;">
+              {{ isDonationExpanded ? 'Ver menos' : 'Ver más' }}
+            </button>
+          </div>
+          <div v-if="isDonationExpanded && channelInfo.donation_long_message" style="font-size: 12.5px; color: #9595b0; margin-bottom: 12px; line-height: 1.5; white-space: pre-line; padding-left: 6px; border-left: 2px solid #2a2a40; transition: all 0.3s;">
+            {{ channelInfo.donation_long_message }}
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px;">
+            <!-- Yape -->
+            <div v-if="channelInfo.yape_number" style="display: flex; align-items: center; gap: 8px; background: #1a1a28; padding: 6px 12px; border-radius: 6px; border: 0.5px solid #2a2a40;">
+              <span style="font-size: 12px; font-weight: 700; color: #00e87a;">Yape:</span>
+              <span style="font-size: 12px; color: #c0c0d8;">{{ channelInfo.yape_number }}</span>
+              <button @click="copyYapeNumber" style="background: none; border: none; color: #00e87a; cursor: pointer; display: flex; align-items: center; padding: 2px;" title="Copiar número de Yape">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-copy"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </div>
+            <!-- PayPal -->
+            <a v-if="channelInfo.paypal_link" :href="channelInfo.paypal_link" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; background: #0070ba; color: #fff; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='#005ea6'" onmouseout="this.style.background='#0070ba'">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 2px;"><path d="M7.076 21.337H2.47L5.58 1.578h9.72c2.475 0 4.417.587 5.561 1.674 1.096 1.042 1.48 2.535 1.15 4.63-.647 4.119-3.235 6.45-6.892 6.45H10.45l-1.393 8.75c-.073.454-.424.81-1.981.81zM14.61 5.518H9.378l-1.333 8.388h3.948c2.203 0 3.738-1.282 4.103-3.606.333-2.115-.595-3.328-2.613-3.328z" /></svg>
+              Donar con PayPal
+            </a>
+            <!-- Report button -->
+            <button @click="showReportModal = true" style="margin-left: auto; background: rgba(0,232,122,0.1); color: #00e87a; border: 0.5px solid rgba(0,232,122,0.3); padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='rgba(0,232,122,0.2)'" onmouseout="this.style.background='rgba(0,232,122,0.1)'">
+              Reportar Donación
+            </button>
+          </div>
+        </div>
+
+        <!-- Top Donors Ranking -->
+        <div v-if="donationRanking && donationRanking.length > 0" class="donations-panel" style="margin-top: 12px; padding: 14px; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+          <div style="font-size: 11px; font-weight: 700; color: #606080; letter-spacing: 0.5px; margin-bottom: 10px; text-transform: uppercase;">Top Donadores 🏆</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div v-for="(donor, idx) in donationRanking" :key="idx" style="display: flex; justify-content: space-between; align-items: center; background: #1a1a28; padding: 6px 12px; border-radius: 6px; border: 0.5px solid #2a2a40;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-weight: 700; color: #606080; font-size: 12px;">#{{ idx + 1 }}</span>
+                <span style="font-size: 13px; color: #c0c0d8; font-weight: 600;">{{ donor.donor_name }}</span>
+              </div>
+              <span style="font-size: 13px; font-weight: 700; color: #00e87a;">S/. {{ donor.total_amount.toFixed(2) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- About -->
       <div class="section-label">SOBRE EL CANAL</div>
       <div class="streamer-bio">{{ channelInfo.description || 'Este canal no tiene descripción.' }}</div>
@@ -74,13 +134,63 @@
       </div>
 
 
+          <!-- Desktop Donations and Ranking Block -->
+          <div class="hide-mobile" style="margin-bottom: 12px; padding: 0 16px;">
+            <!-- Donations Panel -->
+            <div v-if="channelInfo && (channelInfo.yape_number || channelInfo.paypal_link)" class="donations-panel" style="padding: 14px; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+              <div style="font-size: 11px; font-weight: 700; color: #606080; letter-spacing: 0.5px; margin-bottom: 10px; text-transform: uppercase;">Apoya el Canal (Donaciones)</div>
+              <div v-if="channelInfo.donation_message" style="font-size: 13px; color: #c0c0d8; margin-bottom: 8px; line-height: 1.5; white-space: pre-line;">
+                <span>{{ channelInfo.donation_message }}</span>
+                <button v-if="channelInfo.donation_long_message" @click="isDonationExpanded = !isDonationExpanded" style="background: none; border: none; color: #00e87a; font-weight: 600; cursor: pointer; margin-left: 6px; padding: 0; font-size: 13px; text-decoration: underline;">
+                  {{ isDonationExpanded ? 'Ver menos' : 'Ver más' }}
+                </button>
+              </div>
+              <div v-if="isDonationExpanded && channelInfo.donation_long_message" style="font-size: 12.5px; color: #9595b0; margin-bottom: 12px; line-height: 1.5; white-space: pre-line; padding-left: 6px; border-left: 2px solid #2a2a40; transition: all 0.3s;">
+                {{ channelInfo.donation_long_message }}
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px;">
+                <!-- Yape -->
+                <div v-if="channelInfo.yape_number" style="display: flex; align-items: center; gap: 6px; background: #1a1a28; padding: 4px 8px; border-radius: 6px; border: 0.5px solid #2a2a40;">
+                  <span style="font-size: 11px; font-weight: 700; color: #00e87a;">Yape:</span>
+                  <span style="font-size: 11px; color: #c0c0d8;">{{ channelInfo.yape_number }}</span>
+                  <button @click="copyYapeNumber" style="background: none; border: none; color: #00e87a; cursor: pointer; display: flex; align-items: center; padding: 2px;" title="Copiar número de Yape">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-copy"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
+                </div>
+                <!-- PayPal -->
+                <a v-if="channelInfo.paypal_link" :href="channelInfo.paypal_link" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; background: #0070ba; color: #fff; padding: 4px 10px; border-radius: 6px; text-decoration: none; font-size: 11px; font-weight: 700; transition: background 0.2s;" onmouseover="this.style.background='#005ea6'" onmouseout="this.style.background='#0070ba'">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 2px;"><path d="M7.076 21.337H2.47L5.58 1.578h9.72c2.475 0 4.417.587 5.561 1.674 1.096 1.042 1.48 2.535 1.15 4.63-.647 4.119-3.235 6.45-6.892 6.45H10.45l-1.393 8.75c-.073.454-.424.81-1.981.81zM14.61 5.518H9.378l-1.333 8.388h3.948c2.203 0 3.738-1.282 4.103-3.606.333-2.115-.595-3.328-2.613-3.328z" /></svg>
+                  PayPal
+                </a>
+                <!-- Report button -->
+                <button @click="showReportModal = true" style="margin-left: auto; background: rgba(0,232,122,0.1); color: #00e87a; border: 0.5px solid rgba(0,232,122,0.3); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='rgba(0,232,122,0.2)'" onmouseout="this.style.background='rgba(0,232,122,0.1)'">
+                  Reportar
+                </button>
+              </div>
+            </div>
+
+            <!-- Top Donors Ranking -->
+            <div v-if="donationRanking && donationRanking.length > 0" class="donations-panel" style="margin-top: 10px; padding: 14px; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+              <div style="font-size: 11px; font-weight: 700; color: #606080; letter-spacing: 0.5px; margin-bottom: 10px; text-transform: uppercase;">Top Donadores 🏆</div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div v-for="(donor, idx) in donationRanking" :key="idx" style="display: flex; justify-content: space-between; align-items: center; background: #1a1a28; padding: 5px 10px; border-radius: 6px; border: 0.5px solid #2a2a40;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-weight: 700; color: #606080; font-size: 11px;">#{{ idx + 1 }}</span>
+                    <span style="font-size: 12px; color: #c0c0d8; font-weight: 600;">{{ donor.donor_name }}</span>
+                  </div>
+                  <span style="font-size: 12px; font-weight: 700; color: #00e87a;">S/. {{ donor.total_amount.toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Chat -->
-      <ChatBox 
-        :channelId="channelInfo.id" 
-        :currentUser="currentUser" 
-        @viewer-update="handleViewerUpdate" 
-        @stream-reload="handleStreamReload"
-      />
+          <ChatBox 
+            :channelId="channelInfo.id" 
+            :currentUser="currentUser" 
+            @viewer-update="handleViewerUpdate" 
+            @stream-reload="handleStreamReload"
+          />
         </div>
       </div>
     </template>
@@ -115,6 +225,54 @@
         <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.9-.32-1.98-.23-2.81.33-.85.51-1.44 1.43-1.58 2.41-.05.38-.05.77-.01 1.14.12 1.25.96 2.37 2.14 2.78.47.16.97.21 1.46.2.9-.03 1.76-.36 2.44-1.04.72-.73 1.1-1.74 1.11-2.75V0l.04.02z"/>
       </svg>
     </a>
+
+    <!-- REPORT DONATION MODAL -->
+    <div v-if="showReportModal" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 16px;">
+      <div style="background: #0d0d18; border: 1px solid #1a1a28; border-radius: 12px; width: 100%; max-width: 420px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+          <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 700;">Reportar Donación</h3>
+          <button @click="closeReportModal" style="background: none; border: none; color: #606080; cursor: pointer; font-size: 18px; padding: 4px;">&times;</button>
+        </div>
+        
+        <form @submit.prevent="submitDonationReport" style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #606080;">NOMBRE O ALIAS</label>
+            <input v-model="reportForm.donorName" type="text" :disabled="reportForm.isAnonymous" placeholder="Ej: Juan Pérez" style="background: #13131f; border: 0.5px solid #2a2a40; border-radius: 6px; padding: 8px 12px; color: #c0c0d8; font-size: 13px;" required />
+            <label style="display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: #9595b0; cursor: pointer;">
+              <input type="checkbox" v-model="reportForm.isAnonymous" @change="handleAnonymousChange" />
+              Donar de forma anónima
+            </label>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #606080;">MONTO (S/.)</label>
+            <input v-model.number="reportForm.amount" type="number" step="0.01" min="0.01" placeholder="Ej: 10.00" style="background: #13131f; border: 0.5px solid #2a2a40; border-radius: 6px; padding: 8px 12px; color: #c0c0d8; font-size: 13px;" required />
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #606080;">MÉTODO DE DONACIÓN</label>
+            <select v-model="reportForm.method" style="background: #13131f; border: 0.5px solid #2a2a40; border-radius: 6px; padding: 8px 12px; color: #c0c0d8; font-size: 13px;" required>
+              <option value="yape">Yape</option>
+              <option value="paypal">PayPal</option>
+            </select>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #606080;">CÓDIGO O NÚMERO DE OPERACIÓN (OPCIONAL)</label>
+            <input v-model="reportForm.referenceCode" type="text" placeholder="Ej: 987654 (Ayuda a verificar tu donación)" style="background: #13131f; border: 0.5px solid #2a2a40; border-radius: 6px; padding: 8px 12px; color: #c0c0d8; font-size: 13px;" />
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11px; font-weight: 700; color: #606080;">COMPROBANTE O CAPTURA (OPCIONAL)</label>
+            <input type="file" @change="handleFileChange" accept="image/*" style="background: #13131f; border: 0.5px solid #2a2a40; border-radius: 6px; padding: 8px 12px; color: #c0c0d8; font-size: 13px;" />
+          </div>
+
+          <button type="submit" :disabled="isSubmittingReport" style="background: #00e87a; color: #0d0d18; border: none; border-radius: 6px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#00c969'" onmouseout="this.style.background='#00e87a'">
+            {{ isSubmittingReport ? 'Enviando...' : 'Enviar Reporte' }}
+          </button>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -136,6 +294,268 @@ const followerCount = ref(0)
 const isFollowing = ref(false)
 const deferredPrompt = ref(null)
 const isStandalone = ref(false)
+
+// ── Cast to TV ────────────────────────────────────────────
+const isCasting = ref(false)
+
+const initCastContext = () => {
+  if (!window.cast || !window.cast.framework) return
+  try {
+    const ctx = window.cast.framework.CastContext.getInstance()
+    ctx.setOptions({
+      receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+    })
+    ctx.addEventListener(
+      window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+      (e) => {
+        isCasting.value = e.castState === window.cast.framework.CastState.CONNECTED
+      }
+    )
+
+    // Diagnóstico: observador global del estado del reproductor en el receptor.
+    // RemotePlayerController SÍ refleja el estado en todo momento (a diferencia
+    // de getMediaSession justo tras loadMedia). Aquí veremos si el receptor
+    // queda en BUFFERING, pasa a IDLE con idleReason=ERROR, o llega a PLAYING.
+    try {
+      const rp = new window.cast.framework.RemotePlayer()
+      const rpc = new window.cast.framework.RemotePlayerController(rp)
+      const RPET = window.cast.framework.RemotePlayerEventType
+      rpc.addEventListener(RPET.PLAYER_STATE_CHANGED, () => {
+        console.log('[CAST] playerState:', rp.playerState)
+      })
+      rpc.addEventListener(RPET.IS_PLAYING_CHANGED, () => {
+        console.log('[CAST] isPlaying:', rp.isPlaying, '| duration:', rp.duration, '| currentTime:', rp.currentTime)
+      })
+      rpc.addEventListener(RPET.MEDIA_INFO_CHANGED, () => {
+        console.log('[CAST] mediaInfo:', rp.mediaInfo)
+      })
+    } catch (e) {
+      console.warn('[CAST] no se pudo crear RemotePlayerController:', e)
+    }
+  } catch (e) {
+    console.error('Cast init error:', e)
+  }
+}
+
+const triggerCastTV = () => {
+  if (isCasting.value) {
+    const ctx = window.cast?.framework?.CastContext.getInstance()
+    if (ctx) ctx.endCurrentSession(true)
+    isCasting.value = false
+    return
+  }
+
+  if (window.cast && window.cast.framework) {
+    try {
+      const ctx = window.cast.framework.CastContext.getInstance()
+      const castState = ctx.getCastState()
+      console.log('Cast state before action:', castState)
+      
+      if (castState === window.cast.framework.CastState.NO_DEVICES_AVAILABLE) {
+        console.warn('No Cast devices available on this network')
+        alert('No hay dispositivos Cast disponibles en esta red.\nVerifica que estén encendidos y conectados a la misma red WiFi.')
+        return
+      }
+      
+      // If already connected, use the existing session
+      if (castState === window.cast.framework.CastState.CONNECTED) {
+        console.log('Already connected to Cast. Using existing session...')
+        const session = typeof ctx.getCurrentSession === 'function'
+          ? ctx.getCurrentSession()
+          : null
+        console.log('Current session from CastContext:', session)
+        if (session) {
+          loadMediaToSession(session)
+          return
+        } else {
+          console.log('No current session found despite CONNECTED state. Requesting new session...')
+        }
+      }
+      
+      // Request a new session
+      console.log('Requesting new Cast session...')
+      ctx.setOptions({
+        receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+        autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+      })
+      
+      ctx.requestSession().then(
+        () => {
+          // Pedir la sesión al contexto
+          const session = ctx.getCurrentSession()
+          console.log('Session obtained:', session)
+          if (!session) {
+            console.error('Cast session is null')
+            alert('No se pudo obtener sesión de Cast.')
+            return
+          }
+          loadMediaToSession(session)
+        },
+        (err) => {
+          console.error('Error requesting cast session:', err?.message)
+          alert('Error al conectar con Cast: ' + (err?.message || 'desconocido'))
+        }
+      )
+    } catch (e) {
+      console.error('Cast error:', e?.message)
+      alert('Error al activar Cast: ' + (e?.message || 'desconocido'))
+    }
+  } else {
+    console.error('Cast API not available')
+  }
+}
+
+const loadMediaToSession = (session) => {
+  if (!session) return
+  if (typeof session.loadMedia !== 'function') {
+    console.error('Session does not support loadMedia')
+    return
+  }
+  if (!channelInfo.value) return
+
+  // Castear SIEMPRE por el endpoint unificado /api con cast=1, tanto para OBS
+  // como para IPTV: sirve un manifiesto plano (secuencia estándar, sin
+  // discontinuidades) con el HLS limpio, o el respaldo plano de IPTV. El
+  // receptor CAF/Shaka del Chromecast no tolera el manifiesto de secuencias
+  // virtuales que sí acepta hls.js en el navegador.
+  const castUrl = `${window.location.origin}/api/v1/streams/playback/${channelInfo.value.id}/manifest?cast=1`
+  console.log('URL absoluta enviada a la TV:', castUrl)
+
+  const mediaInfo = new window.chrome.cast.media.MediaInfo(castUrl, 'application/x-mpegurl')
+  const metadata = new window.chrome.cast.media.GenericMediaMetadata()
+  metadata.title = channelInfo.value.name || 'Fuchibol'
+  metadata.subtitle = 'En vivo · Fuchibol'
+  mediaInfo.metadata = metadata
+  mediaInfo.streamType = window.chrome.cast.media.StreamType.LIVE
+
+  const req = new window.chrome.cast.media.LoadRequest(mediaInfo)
+  req.autoplay = true
+  session.loadMedia(req).then(
+    () => {
+      console.log('Media loaded successfully')
+      isCasting.value = true
+
+      // Diagnóstico: sondear la sesión de medios y registrar el estado real
+      // del receptor (playerState + idleReason) durante ~15s. idleReason=ERROR
+      // significa que el receptor rechazó el contenido.
+      let tries = 0
+      const poll = setInterval(() => {
+        tries++
+        let media = null
+        try { media = session.getMediaSession ? session.getMediaSession() : null } catch (e) { /* noop */ }
+        if (media) {
+          console.log('[CAST] t=' + tries + ' playerState:', media.playerState,
+            '| idleReason:', media.idleReason,
+            '| currentTime:', media.getEstimatedTime ? media.getEstimatedTime() : media.currentTime)
+        } else {
+          console.log('[CAST] t=' + tries + ' sin mediaSession todavía')
+        }
+        if (tries >= 15) clearInterval(poll)
+      }, 1000)
+    },
+    (err) => console.error('Error loading media:', err)
+  )
+}
+
+const donationRanking = ref([])
+const showReportModal = ref(false)
+const isSubmittingReport = ref(false)
+const reportForm = ref({
+  donorName: '',
+  amount: null,
+  method: 'yape',
+  referenceCode: '',
+  isAnonymous: false
+})
+
+const handleAnonymousChange = () => {
+  if (reportForm.value.isAnonymous) {
+    reportForm.value.donorName = 'Anónimo'
+  } else {
+    reportForm.value.donorName = ''
+  }
+}
+
+const selectedFile = ref(null)
+
+const handleFileChange = (event) => {
+  selectedFile.value = event.target.files[0]
+}
+
+const closeReportModal = () => {
+  showReportModal.value = false
+  selectedFile.value = null
+  reportForm.value = {
+    donorName: '',
+    amount: null,
+    method: 'yape',
+    referenceCode: '',
+    isAnonymous: false
+  }
+}
+
+const fetchDonationRanking = async () => {
+  if (!channelInfo.value) return
+  try {
+    const res = await fetch(`/api/v1/channels/${channelInfo.value.id}/donations/ranking`)
+    if (res.ok) {
+      donationRanking.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Error fetching donation ranking:', err)
+  }
+}
+
+const submitDonationReport = async () => {
+  if (isSubmittingReport.value) return
+  isSubmittingReport.value = true
+  try {
+    let receiptUrl = null
+    
+    // If a receipt screenshot file is selected, upload it first
+    if (selectedFile.value) {
+      const formData = new FormData()
+      formData.append('receipt', selectedFile.value)
+      
+      const fileRes = await fetch(`/api/v1/channels/${channelInfo.value.id}/donations/receipt`, {
+        method: 'POST',
+        body: formData
+      })
+      if (!fileRes.ok) {
+        throw new Error('Error al subir comprobante de pago.')
+      }
+      const fileData = await fileRes.json()
+      receiptUrl = fileData.receipt_url
+    }
+
+    const res = await fetch(`/api/v1/channels/${channelInfo.value.id}/donations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        donor_name: reportForm.value.donorName,
+        amount: Number(reportForm.value.amount),
+        method: reportForm.value.method,
+        reference_code: reportForm.value.referenceCode,
+        receipt_url: receiptUrl
+      })
+    })
+    if (res.ok) {
+      alert('Reporte de donación enviado con éxito. Se mostrará en el ranking una vez sea aprobado por el administrador.')
+      closeReportModal()
+    } else {
+      const data = await res.json()
+      alert(data.error || 'Error al enviar reporte de donación.')
+    }
+  } catch (err) {
+    console.error(err)
+    alert('Error de conexión al enviar el reporte.')
+  } finally {
+    isSubmittingReport.value = false
+  }
+}
 
 const installApp = async () => {
   if (deferredPrompt.value) {
@@ -264,12 +684,14 @@ const fetchChannel = async (forceReload = false) => {
       }
       
       playbackUrl.value = currentUrl
+      data.playback_url = playData.playback_url
       
       data.is_live = playData.is_live
     }
 
     // Now update channelInfo to trigger a single, accurate reactive update
     channelInfo.value = data
+    fetchDonationRanking()
 
     // Only fetch follow status once or when needed
     if (followerCount.value === 0) {
@@ -288,6 +710,14 @@ onMounted(() => {
     isStandalone.value = true
   }
 
+  // Initialize Cast on mount if SDK already loaded
+  if (typeof window !== 'undefined') {
+    window['__onGCastApiAvailable'] = (isAvailable) => {
+      if (isAvailable) initCastContext()
+    }
+    initCastContext()
+  }
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
     deferredPrompt.value = e
@@ -295,11 +725,44 @@ onMounted(() => {
 
   const userObj = localStorage.getItem('fuchibol_user')
   if (userObj) {
-    currentUser.value = JSON.parse(userObj)
+    const parsed = JSON.parse(userObj)
+    currentUser.value = parsed
+    
+    // Fetch fresh profile details (including user ID) from backend
+    fetch('/api/v1/auth/me', {
+      headers: { 'Authorization': `Bearer ${parsed.token}` }
+    })
+      .then(res => {
+        if (res.ok) return res.json()
+        throw new Error('Unauthorized')
+      })
+      .then(userData => {
+        currentUser.value = {
+          ...parsed,
+          id: userData.id,
+          username: userData.username,
+          role: userData.role
+        }
+        localStorage.setItem('fuchibol_user', JSON.stringify(currentUser.value))
+      })
+      .catch(err => {
+        console.error('Error fetching user info on mount:', err)
+        localStorage.removeItem('fuchibol_user')
+        currentUser.value = null
+      })
   }
   fetchChannel()
   pollInterval = setInterval(fetchChannel, 10000)
 })
+
+const isDonationExpanded = ref(false)
+
+const copyYapeNumber = () => {
+  if (channelInfo.value && channelInfo.value.yape_number) {
+    navigator.clipboard.writeText(channelInfo.value.yape_number)
+    alert('¡Número de Yape copiado al portapapeles!')
+  }
+}
 
 onBeforeUnmount(() => {
   if (pollInterval) clearInterval(pollInterval)
@@ -629,7 +1092,20 @@ onBeforeUnmount(() => {
   transform: scale(1.1);
 }
 
+.hide-desktop {
+  display: block;
+}
+.hide-mobile {
+  display: none;
+}
+
 @media (min-width: 1024px) {
+  .hide-desktop {
+    display: none !important;
+  }
+  .hide-mobile {
+    display: block !important;
+  }
   .home-grid {
     display: grid;
     grid-template-columns: 7fr 3fr;
@@ -644,6 +1120,7 @@ onBeforeUnmount(() => {
   .home-sidebar {
     display: flex;
     flex-direction: column;
+    padding-top: 16px;
   }
   .video-wrap {
     height: auto;
@@ -661,5 +1138,32 @@ onBeforeUnmount(() => {
   .channel-meta { justify-content: center; }
   .follow-btn { width: 100%; margin-top: 10px; }
 }
-</style>
 
+.cast-tv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #c0c0d8;
+  border: 0.5px solid #2a2a40;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s;
+}
+
+.cast-tv-btn:hover {
+  background: rgba(0, 232, 122, 0.1);
+  border-color: rgba(0, 232, 122, 0.35);
+  color: #00e87a;
+}
+
+.cast-tv-btn.active {
+  background: rgba(0, 232, 122, 0.15);
+  border-color: #00e87a;
+  color: #00e87a;
+}
+</style>

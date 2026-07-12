@@ -14,6 +14,7 @@ import (
 
 	"fuchibol-backend-go/database"
 	"fuchibol-backend-go/models"
+	"fuchibol-backend-go/services"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -74,16 +75,20 @@ func GetPlaybackURL(c *fiber.Ctx) error {
 	}
 
 	if channel.IsLive {
-		playbackUrl = fmt.Sprintf("%s%s/live/%s.m3u8", c.BaseURL(), hlsBaseUrl, streamName)
+		playbackUrl = fmt.Sprintf("%s/live/%s.m3u8", hlsBaseUrl, streamName)
 	} else if channel.IptvEnabled && channel.ActiveIptvUrl != nil && *channel.ActiveIptvUrl != "" {
-		playbackUrl = fmt.Sprintf("%s/api/v1/proxy/m3u8/%d", c.BaseURL(), channel.ID)
+		playbackUrl = fmt.Sprintf("/api/v1/proxy/m3u8/%d", channel.ID)
 	} else {
-		playbackUrl = fmt.Sprintf("%s%s/offline/offline.m3u8", c.BaseURL(), hlsBaseUrl)
+		playbackUrl = fmt.Sprintf("%s/offline/offline.m3u8", hlsBaseUrl)
 	}
 
 	streamType := "hls"
 	if channel.IsLive {
-		streamType = "webrtc"
+		// Use HLS by default for OBS streams to prioritize stability.
+		// Set OBS_STREAM_TECH=webrtc in environment variables to revert to WebRTC.
+		if os.Getenv("OBS_STREAM_TECH") == "webrtc" {
+			streamType = "webrtc"
+		}
 	}
 
 	return c.JSON(fiber.Map{
@@ -120,6 +125,65 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 		return c.Status(404).SendString("Channel not found")
 	}
 
+	// Public base URL (scheme+host) as seen behind the reverse proxy, used to
+	// build absolute segment URLs for strict players (Chromecast/Smart TV).
+	baseURL := strings.TrimSuffix(c.BaseURL(), "/")
+
+	// Prefix used to make bare (relative) OBS segment filenames absolute.
+	// Defaults to the raw SRS HLS location; switched to the clean location
+	// when the Chromecast-friendly playlist is available.
+	obsSegmentPrefix := baseURL + "/hls/live/"
+
+	// Cast mode: the Chromecast/Smart-TV receiver (CAF/Shaka) is stricter than
+	// hls.js and rejects our virtual-sequence manifest (huge MEDIA-SEQUENCE and
+	// injected discontinuities). For casting we serve the clean ffmpeg playlist
+	// verbatim (standard sequence, absolute segment URLs, no state machine) —
+	// exactly the plain shape that the working IPTV playlist has.
+	if c.Query("cast") == "1" && (channel.IsLive || channel.IptvEnabled) {
+		// Pick the clean stream name for the active source. OBS is keyed by its
+		// SRS stream name; IPTV by channel_<id>.
+		cleanName := fmt.Sprintf("channel_%d", channel.ID)
+		if channel.IsLive {
+			if channel.ActiveStreamName != "" {
+				cleanName = channel.ActiveStreamName
+			}
+			// Lazily (re)start the OBS clean pipeline if needed.
+			if !services.CleanHLSReady(cleanName) {
+				services.StartCleanHLS(cleanName)
+			}
+		}
+
+		// Prefer the clean playlist (SEI-stripped, plain sequence, absolute URLs).
+		cleanPath := fmt.Sprintf("%s/%s.m3u8", services.CleanHLSDir, cleanName)
+		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 {
+			lines := strings.Split(string(contentBytes), "\n")
+			for i, line := range lines {
+				t := strings.TrimSpace(line)
+				if t != "" && !strings.HasPrefix(t, "#") &&
+					!strings.HasPrefix(t, "http") && !strings.HasPrefix(t, "/") {
+					lines[i] = baseURL + "/hls/live_clean/" + t
+				}
+			}
+			c.Set("Content-Type", "application/vnd.apple.mpegurl")
+			c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Set("Access-Control-Allow-Origin", "*")
+			return c.SendString(strings.Join(lines, "\n"))
+		}
+
+		// Fallback for IPTV: serve the plain proxy-rewritten playlist (absolute
+		// proxied URLs) — the shape that already casts fine — never the
+		// virtual-sequence manifest, which strict receivers reject.
+		if !channel.IsLive && channel.IptvEnabled && channel.ActiveIptvUrl != nil && *channel.ActiveIptvUrl != "" {
+			if pl, plErr := downloadAndRewriteIPTV(channel.ID, *channel.ActiveIptvUrl, baseURL); plErr == nil {
+				c.Set("Content-Type", "application/vnd.apple.mpegurl")
+				c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				c.Set("Access-Control-Allow-Origin", "*")
+				return c.SendString(pl)
+			}
+		}
+		// OBS clean not ready yet: fall through to normal handling meanwhile.
+	}
+
 	// 1. Determine active signal type
 	currentSignalType := "offline"
 	var rawPlaylist string
@@ -132,12 +196,25 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 		if streamName == "" {
 			streamName = fmt.Sprintf("channel_%d", channel.ID)
 		}
-		path := fmt.Sprintf("/app/srs_hls/live/%s.m3u8", streamName)
-		contentBytes, fileErr := os.ReadFile(path)
-		if fileErr == nil {
+
+		// Prefer the clean HLS (SEI stripped) that plays on Chromecast/Smart TV.
+		// If the backend restarted while OBS was already live, lazily (re)start
+		// the ffmpeg — it's idempotent — and fall back to raw SRS meanwhile.
+		if !services.CleanHLSReady(streamName) {
+			services.StartCleanHLS(streamName)
+		}
+
+		cleanPath := fmt.Sprintf("%s/%s.m3u8", services.CleanHLSDir, streamName)
+		rawPath := fmt.Sprintf("/app/srs_hls/live/%s.m3u8", streamName)
+
+		if contentBytes, fileErr := os.ReadFile(cleanPath); fileErr == nil && len(contentBytes) > 0 {
 			rawPlaylist = string(contentBytes)
+			obsSegmentPrefix = baseURL + "/hls/live_clean/"
+		} else if contentBytes, fileErr := os.ReadFile(rawPath); fileErr == nil {
+			rawPlaylist = string(contentBytes)
+			obsSegmentPrefix = baseURL + "/hls/live/"
 		} else {
-			// Fallback to offline if SRS file doesn't exist yet
+			// Fallback to offline if neither file exists yet
 			currentSignalType = "offline"
 		}
 	}
@@ -186,16 +263,19 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 		rawSeq, _ = strconv.Atoi(seqSubmatch[1])
 	}
 
-	// Detect signal type transition
-	if state.LastSignalType != currentSignalType {
+	// Rebase the virtual sequence when the source playlist changes signal type
+	// OR when its raw MEDIA-SEQUENCE goes backwards (the underlying ffmpeg/SRS
+	// restarted and reset its numbering). Without the second case the virtual
+	// sequence would jump backwards and the player would replay old fragments.
+	if state.LastSignalType != currentSignalType || rawSeq < state.LastRawSequence {
 		// Calculate the virtual sequence of the last segment served in the previous playlist
 		lastVirtualSeqStart := state.LastRawSequence + state.SequenceOffset
 		lastVirtualSeqEnd := lastVirtualSeqStart + state.LastSegmentCount - 1
-		
+
 		// The new virtual sequence starts exactly after the last segment served
 		nextVirtualSeq := lastVirtualSeqEnd + 1
 		state.SequenceOffset = nextVirtualSeq - rawSeq
-		
+
 		// Record discontinuity at the transition boundary
 		state.Discontinuities = append(state.Discontinuities, nextVirtualSeq)
 		state.LastSignalType = currentSignalType
@@ -229,6 +309,16 @@ func GetUnifiedManifest(c *fiber.Ctx) error {
 			segmentIndex++
 		}
 
+		// Ensure segment URIs are fully-qualified absolute URLs. SRS emits bare
+		// relative filenames (e.g. "channel_1-342-....ts"). Strict players like
+		// the Chromecast receiver (Shaka) can load the manifest but fail to play
+		// unless segments are absolute — matching the IPTV path, which already
+		// emits absolute URLs and casts correctly.
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") &&
+			!strings.HasPrefix(trimmed, "http") && !strings.HasPrefix(trimmed, "/") {
+			line = obsSegmentPrefix + trimmed
+		}
+
 		rewrittenLines = append(rewrittenLines, line)
 	}
 
@@ -260,8 +350,7 @@ func downloadAndRewriteIPTV(channelID uint, targetUrl string, baseURL string) (s
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "*/*")
 
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := proxyClient.Do(req)
 	if err != nil {
 		return "", err
 	}

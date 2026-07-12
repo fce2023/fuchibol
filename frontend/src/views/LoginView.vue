@@ -127,14 +127,17 @@ const handleSubmit = async () => {
       })
       
       let username = form.email.split('@')[0]
+      let id = 0
       let role = 'user'
       if (meRes.ok) {
         const meData = await meRes.json()
         username = meData.username
         role = meData.role
+        id = meData.id
       }
       
       localStorage.setItem('fuchibol_user', JSON.stringify({
+        id: id,
         username: username,
         role: role,
         token: data.access_token

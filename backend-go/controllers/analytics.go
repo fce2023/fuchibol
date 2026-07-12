@@ -65,17 +65,18 @@ func TrackView(c *fiber.Ctx) error {
 		ip = realIP
 	}
 
-	country, city := resolveGeo(ip)
-
-	log := models.AnalyticsLog{
-		ChannelID: req.ChannelID,
-		IPAddress: ip,
-		Country:   country,
-		City:      city,
-		UserAgent: c.Get("User-Agent"),
-	}
-
-	database.DB.Create(&log)
+	userAgent := c.Get("User-Agent")
+	go func(channelID uint, ipAddress, ua string) {
+		country, city := resolveGeo(ipAddress)
+		log := models.AnalyticsLog{
+			ChannelID: channelID,
+			IPAddress: ipAddress,
+			Country:   country,
+			City:      city,
+			UserAgent: ua,
+		}
+		database.DB.Create(&log)
+	}(req.ChannelID, ip, userAgent)
 
 	return c.JSON(fiber.Map{"status": "tracked"})
 }

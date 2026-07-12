@@ -26,6 +26,10 @@ services:
     build:
       context: ./srs
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     command: ./objs/srs -c conf/srs.conf
     ports:
       - "1936:1935"
@@ -55,6 +59,7 @@ services:
       - SECRET_KEY=fuchibol_super_secret_key_change_me_in_prod
       - JWT_ALGORITHM=HS256
       - HLS_BASE_URL=/hls
+      - OBS_STREAM_TECH=hls
     depends_on:
       - db
       - redis
@@ -72,6 +77,7 @@ services:
       - DATABASE_URL=postgresql://fuchibol_user:fuchibol_password@db:5432/fuchibol_db
       - REDIS_URL=redis://redis:6379/0
       - HLS_BASE_URL=/hls
+      - OBS_STREAM_TECH=hls
     depends_on:
       - db
       - redis

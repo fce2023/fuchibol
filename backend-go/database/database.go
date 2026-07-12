@@ -41,6 +41,7 @@ func ConnectDB() {
 		&models.Follower{},
 		&models.BlockedTerm{},
 		&models.AnalyticsLog{},
+		&models.Donation{},
 	)
 	if err != nil {
 		log.Println("AutoMigrate failed (ignoring for backward compatibility with Python DB): \n", err)

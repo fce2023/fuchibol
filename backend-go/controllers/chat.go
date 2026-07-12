@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -9,11 +10,13 @@ import (
 
 	"fuchibol-backend-go/database"
 	"fuchibol-backend-go/models"
+	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 )
 
 // ChatMessagePayload defines the incoming JSON structure
 type ChatMessagePayload struct {
+	ID        uint   `json:"id,omitempty"`
 	Type      string `json:"type,omitempty"` // "chat", "viewers"
 	ChannelID uint   `json:"channel_id"`
 	Content   string `json:"content"`
@@ -45,9 +48,14 @@ var ChatHub = Hub{
 
 func broadcastViewers(h *Hub, channelID uint) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	count := len(h.rooms[channelID])
+	h.mu.RUnlock()
 	
+	// Sync to Redis for the Python restreamer optimization
+	if database.RedisClient != nil {
+		database.RedisClient.Set(database.Ctx, fmt.Sprintf("channel:%d:viewers", channelID), count, 0)
+	}
+
 	msg := ChatMessagePayload{
 		Type:      "viewers",
 		ChannelID: channelID,
@@ -94,17 +102,19 @@ func (h *Hub) Run() {
 			broadcastViewers(h, req.channelID)
 
 		case msg := <-h.broadcast:
-			// Guardar el mensaje en BD de forma asíncrona sin bloquear el chat
+			// Guardar el mensaje en BD
 			if msg.Type == "" || msg.Type == "chat" {
-				go func(m ChatMessagePayload) {
-					dbMsg := models.ChatMessage{
-						ChannelID: m.ChannelID,
-						UserID:    m.UserID,
-						Content:   m.Content,
-						Timestamp: time.Now(),
-					}
-					database.DB.Create(&dbMsg)
-				}(msg)
+				dbMsg := models.ChatMessage{
+					ChannelID: msg.ChannelID,
+					UserID:    msg.UserID,
+					Content:   msg.Content,
+					Timestamp: time.Now(),
+				}
+				if err := database.DB.Create(&dbMsg).Error; err == nil {
+					msg.ID = dbMsg.ID
+				} else {
+					log.Printf("Error guardando mensaje en BD: %v", err)
+				}
 			}
 
 			// Enviar (broadcast) a todos los usuarios conectados a esta sala/canal
@@ -157,3 +167,161 @@ func WebsocketHandler(c *websocket.Conn) {
 		}
 	}
 }
+
+// GetChatHistory fetches the last 50 chat messages for a channel
+func GetChatHistory(c *fiber.Ctx) error {
+	channelIDStr := c.Params("id")
+	channelID, err := strconv.ParseUint(channelIDStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid channel ID",
+		})
+	}
+
+	var dbMessages []models.ChatMessage
+	err = database.DB.Preload("User").
+		Where("channel_id = ? AND is_deleted = ?", uint(channelID), false).
+		Order("timestamp desc").
+		Limit(50).
+		Find(&dbMessages).Error
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch chat history",
+		})
+	}
+
+	// Reverse the order so they are chronologically ordered (oldest first)
+	for i, j := 0, len(dbMessages)-1; i < j; i, j = i+1, j-1 {
+		dbMessages[i], dbMessages[j] = dbMessages[j], dbMessages[i]
+	}
+
+	return c.JSON(dbMessages)
+}
+
+// ClearChatHistory deletes (soft-deletes) all messages for a channel
+func ClearChatHistory(c *fiber.Ctx) error {
+	userID := ExtractUserID(c)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	channelIDStr := c.Params("id")
+	channelID, err := strconv.ParseUint(channelIDStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid channel ID",
+		})
+	}
+
+	// Retrieve the channel to check permissions
+	var channel models.Channel
+	if err := database.DB.Where("id = ?", uint(channelID)).First(&channel).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Channel not found"})
+	}
+
+	// Fetch user details to check role
+	var user models.User
+	if err := database.DB.Where("id = ?", userID).First(&user).Error; err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Check authorization: must be the channel owner or an admin
+	if channel.UserID != userID && user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Forbidden: You do not own this channel"})
+	}
+
+	// Soft delete all active messages for this channel
+	err = database.DB.Model(&models.ChatMessage{}).
+		Where("channel_id = ? AND is_deleted = ?", uint(channelID), false).
+		Updates(map[string]interface{}{
+			"is_deleted":      true,
+			"deleted_by":      userID,
+			"deletion_reason": "Cleared by admin",
+		}).Error
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to clear chat history",
+		})
+	}
+
+	// Broadcast chat_cleared event to notify connected clients in real-time
+	ChatHub.BroadcastType(uint(channelID), "chat_cleared", "El chat ha sido limpiado por el moderador.")
+
+	return c.JSON(fiber.Map{
+		"message": "Chat cleared successfully",
+	})
+}
+
+// DeleteChatMessage deletes (soft-deletes) a single message
+func DeleteChatMessage(c *fiber.Ctx) error {
+	userID := ExtractUserID(c)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	channelIDStr := c.Params("id")
+	channelID, err := strconv.ParseUint(channelIDStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid channel ID"})
+	}
+
+	msgIDStr := c.Params("msgId")
+	msgID, err := strconv.ParseUint(msgIDStr, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid message ID"})
+	}
+
+	// Fetch message
+	var msg models.ChatMessage
+	if err := database.DB.Where("id = ? AND channel_id = ?", uint(msgID), uint(channelID)).First(&msg).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Message not found"})
+	}
+
+	// Fetch channel to verify ownership
+	var channel models.Channel
+	if err := database.DB.Where("id = ?", uint(channelID)).First(&channel).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Channel not found"})
+	}
+
+	// Fetch requesting user to verify roles
+	var user models.User
+	if err := database.DB.Where("id = ?", userID).First(&user).Error; err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Check permission: channel owner, message sender, admin, or mod
+	isOwner := channel.UserID == userID
+	isSender := msg.UserID == userID
+	isAdminOrMod := user.Role == "admin" || user.Role == "mod"
+	if !isOwner && !isSender && !isAdminOrMod {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Forbidden: Cannot delete this message"})
+	}
+
+	// Soft delete the message
+	err = database.DB.Model(&msg).Updates(map[string]interface{}{
+		"is_deleted":      true,
+		"deleted_by":      userID,
+		"deletion_reason": "Deleted by moderator/admin",
+	}).Error
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete message"})
+	}
+
+	// Notify connected websocket clients
+	msgPayload := ChatMessagePayload{
+		Type:      "message_deleted",
+		ChannelID: uint(channelID),
+		Content:   strconv.FormatUint(msgID, 10),
+	}
+	ChatHub.broadcast <- msgPayload
+
+	return c.JSON(fiber.Map{
+		"message": "Message deleted successfully",
+	})
+}
+
+
+

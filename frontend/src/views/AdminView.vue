@@ -170,6 +170,22 @@
                   <label>Enlace TikTok</label>
                   <input v-model="profileData.tiktokLink" type="url" class="input-field" placeholder="https://www.tiktok.com/@...">
                 </div>
+                <div class="form-group">
+                  <label>Número Yape (Donaciones)</label>
+                  <input v-model="profileData.yapeNumber" type="text" class="input-field" placeholder="Ej: 987654321">
+                </div>
+                <div class="form-group">
+                  <label>Enlace PayPal (Donaciones)</label>
+                  <input v-model="profileData.paypalLink" type="url" class="input-field" placeholder="https://paypal.me/...">
+                </div>
+                <div class="form-group" style="grid-column: span 2;">
+                  <label>Mensaje Corto de Donaciones</label>
+                  <input v-model="profileData.donationMessage" type="text" class="input-field" placeholder="Ej: ¡Apoya la transmisión aquí! (Se muestra al inicio)">
+                </div>
+                <div class="form-group" style="grid-column: span 2;">
+                  <label>Mensaje Largo de Donaciones (opcional - aparece al hacer clic en 'Ver más')</label>
+                  <textarea v-model="profileData.donationLongMessage" rows="3" class="input-field" placeholder="Escribe detalles adicionales sobre en qué se usarán las donaciones..." style="resize: vertical;"></textarea>
+                </div>
                 <div class="form-group logo-upload-group">
                   <label>Logo del Canal (JPG/PNG)</label>
                   <div class="logo-preview-container">
@@ -293,6 +309,21 @@
               </button>
             </div>
           </div>
+
+          <!-- Chat Moderation Panel -->
+          <div class="info-card mt-4">
+            <div class="panel-header mb-4">
+              <div class="info-card-title mb-0"><i class="ti ti-message" style="margin-right: 8px;"></i> Moderación de Chat</div>
+            </div>
+            <div class="panel-body">
+              <p style="font-size: 13px; color: #8a8d9a; margin-bottom: 16px;">
+                Borra permanentemente todos los mensajes del chat de tu canal. Esta acción no se puede deshacer y notificará a los espectadores en tiempo real.
+              </p>
+              <button @click="clearChat" class="btn btn-secondary danger-text w-full" :disabled="isClearingChat">
+                {{ isClearingChat ? 'Limpiando chat...' : 'Limpiar Todo el Chat' }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- TAB: AGENDA -->
@@ -364,6 +395,96 @@
             </div>
           </div>
         </div>
+
+        <!-- DONATIONS MANAGEMENT TAB -->
+        <div v-if="activeTab === 'donations'" class="tab-pane section">
+          <div class="info-card">
+            <div class="info-card-title"><i class="ti ti-coin"></i> Reportes de Donaciones</div>
+            
+            <div class="mt-4" style="display: flex; flex-direction: column; gap: 20px;">
+              <!-- PENDING DONATIONS -->
+              <div>
+                <h4 style="color: #fff; margin-bottom: 10px; font-size: 14px; font-weight: 700;">Reportes Pendientes de Verificación</h4>
+                <div class="table-container" style="overflow-x: auto; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+                    <thead>
+                      <tr style="border-bottom: 0.5px solid #1a1a28; color: #606080; text-transform: uppercase; font-size: 11px;">
+                        <th style="padding: 12px 16px;">Donante</th>
+                        <th style="padding: 12px 16px;">Monto</th>
+                        <th style="padding: 12px 16px;">Método</th>
+                        <th style="padding: 12px 16px;">Código de Referencia</th>
+                        <th style="padding: 12px 16px;">Comprobante</th>
+                        <th style="padding: 12px 16px;">Fecha</th>
+                        <th style="padding: 12px 16px; text-align: right;">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="don in pendingDonations" :key="don.id" style="border-bottom: 0.5px solid #1a1a28; color: #c0c0d8;">
+                        <td style="padding: 12px 16px; font-weight: 600;">{{ don.donor_name }}</td>
+                        <td style="padding: 12px 16px; color: #00e87a; font-weight: 700;">S/. {{ don.amount.toFixed(2) }}</td>
+                        <td style="padding: 12px 16px; text-transform: uppercase;">{{ don.method }}</td>
+                        <td style="padding: 12px 16px; font-family: monospace;">{{ don.reference_code || '-' }}</td>
+                        <td style="padding: 12px 16px;">
+                          <a v-if="don.receipt_url" :href="don.receipt_url" target="_blank" style="color: #00e87a; text-decoration: underline; font-weight: 600;">Ver Captura</a>
+                          <span v-else style="color: #606080;">Sin Captura</span>
+                        </td>
+                        <td style="padding: 12px 16px;">{{ formatDate(don.created_at) }}</td>
+                        <td style="padding: 12px 16px; text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
+                          <button @click="reviewDonation(don.id, 'approved')" class="btn btn-primary btn-sm" style="padding: 4px 10px; font-size: 11px; background: #00e87a; color: #0d0d18; border: none; cursor: pointer; border-radius: 4px;">Aprobar</button>
+                          <button @click="reviewDonation(don.id, 'rejected')" class="btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 11px; background: #e83d00; border: 1px solid #e83d00; color: #fff; cursor: pointer; border-radius: 4px;">Rechazar</button>
+                        </td>
+                      </tr>
+                      <tr v-if="pendingDonations.length === 0">
+                        <td colspan="7" style="padding: 24px; text-align: center; color: #606080;">No hay reportes de donación pendientes.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- APPROVED/REJECTED DONATIONS -->
+              <div>
+                <h4 style="color: #fff; margin-bottom: 10px; font-size: 14px; font-weight: 700;">Historial de Donaciones</h4>
+                <div class="table-container" style="overflow-x: auto; background: #13131f; border-radius: 8px; border: 0.5px solid #1a1a28;">
+                  <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+                    <thead>
+                      <tr style="border-bottom: 0.5px solid #1a1a28; color: #606080; text-transform: uppercase; font-size: 11px;">
+                        <th style="padding: 12px 16px;">Donante</th>
+                        <th style="padding: 12px 16px;">Monto</th>
+                        <th style="padding: 12px 16px;">Método</th>
+                        <th style="padding: 12px 16px;">Referencia</th>
+                        <th style="padding: 12px 16px;">Comprobante</th>
+                        <th style="padding: 12px 16px;">Estado</th>
+                        <th style="padding: 12px 16px;">Fecha</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="don in reviewedDonations" :key="don.id" style="border-bottom: 0.5px solid #1a1a28; color: #c0c0d8;">
+                        <td style="padding: 12px 16px; font-weight: 600;">{{ don.donor_name }}</td>
+                        <td style="padding: 12px 16px; color: #00e87a; font-weight: 700;">S/. {{ don.amount.toFixed(2) }}</td>
+                        <td style="padding: 12px 16px; text-transform: uppercase;">{{ don.method }}</td>
+                        <td style="padding: 12px 16px; font-family: monospace;">{{ don.reference_code || '-' }}</td>
+                        <td style="padding: 12px 16px;">
+                          <a v-if="don.receipt_url" :href="don.receipt_url" target="_blank" style="color: #00e87a; text-decoration: underline; font-weight: 600;">Ver Captura</a>
+                          <span v-else style="color: #606080;">Sin Captura</span>
+                        </td>
+                        <td style="padding: 12px 16px;">
+                          <span :style="don.status === 'approved' ? 'color: #00e87a;' : 'color: #e83d00;'" style="font-weight: 700; text-transform: uppercase; font-size: 11px;">
+                            {{ don.status === 'approved' ? 'Aprobada' : 'Rechazada' }}
+                          </span>
+                        </td>
+                        <td style="padding: 12px 16px;">{{ formatDate(don.created_at) }}</td>
+                      </tr>
+                      <tr v-if="reviewedDonations.length === 0">
+                        <td colspan="7" style="padding: 24px; text-align: center; color: #606080;">No hay historial de donaciones.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
     </div><!-- /main -->
@@ -400,6 +521,7 @@ const navItems = [
   { id: 'profile', label: 'Mi Perfil', icon: 'ti ti-user', desc: 'Información de tu cuenta y canal' },
   { id: 'stream', label: 'Transmisión', icon: 'ti ti-video', desc: 'Gestión de claves OBS y fuentes IPTV' },
   { id: 'agenda', label: 'Agenda', icon: 'ti ti-calendar-event', desc: 'Programación de eventos para tu canal' },
+  { id: 'donations', label: 'Donaciones', icon: 'ti ti-coin', desc: 'Aprobar y gestionar donaciones recibidas' },
   { id: 'followers', label: 'Seguidores', icon: 'ti ti-users', desc: 'Comunidad de usuarios que te siguen' }
 ]
 
@@ -469,7 +591,11 @@ const profileData = ref({
   channelName: '',
   whatsappLink: '',
   tiktokLink: '',
-  logoUrl: ''
+  logoUrl: '',
+  yapeNumber: '',
+  paypalLink: '',
+  donationMessage: '',
+  donationLongMessage: ''
 })
 const isUpdatingProfile = ref(false)
 
@@ -637,7 +763,11 @@ const updateProfile = async () => {
       body: JSON.stringify({
         name: profileData.value.channelName,
         whatsapp_link: profileData.value.whatsappLink,
-        tiktok_link: profileData.value.tiktokLink
+        tiktok_link: profileData.value.tiktokLink,
+        yape_number: profileData.value.yapeNumber,
+        paypal_link: profileData.value.paypalLink,
+        donation_message: profileData.value.donationMessage,
+        donation_long_message: profileData.value.donationLongMessage
       })
     })
 
@@ -748,7 +878,12 @@ const loadChannelSettings = async (token) => {
       profileData.value.whatsappLink = data.whatsapp_link || ''
       profileData.value.tiktokLink = data.tiktok_link || ''
       profileData.value.logoUrl = data.logo_url || ''
+      profileData.value.yapeNumber = data.yape_number || ''
+      profileData.value.paypalLink = data.paypal_link || ''
+      profileData.value.donationMessage = data.donation_message || ''
+      profileData.value.donationLongMessage = data.donation_long_message || ''
       activeIptvUrl.value = data.active_iptv_url
+      fetchDonations(token)
       
       // Parse IPTV URLs (handle both old string-list and new object-list formats)
       try {
@@ -898,6 +1033,80 @@ const stopRestream = async () => {
     isProcessing.value = false
   }
 }
+
+const isClearingChat = ref(false)
+
+const clearChat = async () => {
+  if (!confirm('¿Estás seguro de que deseas limpiar todo el chat? Esta acción borrará de forma permanente todos los mensajes.')) {
+    return
+  }
+  isClearingChat.value = true
+  try {
+    const tokenObj = localStorage.getItem('fuchibol_user')
+    const token = tokenObj ? JSON.parse(tokenObj).token : ''
+    const res = await fetch(`/api/v1/channels/${channelId.value}/chat/clear`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      alert('El chat se ha limpiado correctamente.')
+    } else {
+      const err = await res.json()
+      alert(`Error al limpiar el chat: ${err.error || 'Intenta de nuevo'}`)
+    }
+  } catch(e) {
+    console.error(e)
+    alert('Ocurrió un error al intentar limpiar el chat.')
+  } finally {
+    isClearingChat.value = false
+  }
+}
+
+// Donations Admin refs
+const donations = ref([])
+const pendingDonations = computed(() => donations.value.filter(d => d.status === 'pending'))
+const reviewedDonations = computed(() => donations.value.filter(d => d.status !== 'pending'))
+
+const fetchDonations = async (token) => {
+  try {
+    const res = await fetch('/api/v1/channels/me/donations', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      donations.value = await res.json()
+    }
+  } catch (err) {
+    console.error('Error fetching donations:', err)
+  }
+}
+
+const reviewDonation = async (donationId, status) => {
+  const tokenObj = localStorage.getItem('fuchibol_user')
+  const user = tokenObj ? JSON.parse(tokenObj) : null
+  const token = user ? user.token : ''
+  if (!token) return
+
+  try {
+    const res = await fetch(`/api/v1/channels/me/donations/${donationId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ status })
+    })
+    if (res.ok) {
+      alert(status === 'approved' ? 'Donación aprobada exitosamente.' : 'Donación rechazada.')
+      fetchDonations(token)
+    } else {
+      alert('Error al revisar la donación.')
+    }
+  } catch (err) {
+    console.error(err)
+    alert('Error de conexión.')
+  }
+}
+
 
 onMounted(() => {
   serverUrl.value = getRtmpServerUrl()

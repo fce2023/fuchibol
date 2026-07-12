@@ -48,6 +48,12 @@ type Channel struct {
 	TiktokLink       *string        `json:"tiktok_link"`
 	LogoUrl          *string        `json:"logo_url"`
 	
+	// Donations
+	YapeNumber       *string        `gorm:"size:50" json:"yape_number"`
+	PaypalLink       *string        `gorm:"type:text" json:"paypal_link"`
+	DonationMessage  *string        `gorm:"type:text" json:"donation_message"`
+	DonationLongMessage *string     `gorm:"type:text" json:"donation_long_message"`
+	
 	// Relationships
 	User             *User          `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Streams          []Stream       `json:"-"`
@@ -133,4 +139,17 @@ type AnalyticsLog struct {
 	City      string    `gorm:"size:100" json:"city"`
 	UserAgent string    `gorm:"type:text" json:"user_agent"`
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP;index" json:"created_at"`
+}
+
+// Donation model to track manual user donations
+type Donation struct {
+	ID            uint      `gorm:"primaryKey;index" json:"id"`
+	ChannelID     uint      `gorm:"not null;index" json:"channel_id"`
+	DonorName     string    `gorm:"size:100;not null" json:"donor_name"`
+	Amount        float64   `gorm:"type:numeric(10,2);not null" json:"amount"`
+	Method        string    `gorm:"size:50;not null" json:"method"` // yape, paypal
+	ReferenceCode string    `gorm:"size:100" json:"reference_code"`
+	ReceiptUrl    *string   `gorm:"type:text" json:"receipt_url"`
+	Status        string    `gorm:"size:50;not null;default:'pending';index" json:"status"` // pending, approved, rejected
+	CreatedAt     time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 }

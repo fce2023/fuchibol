@@ -4,10 +4,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"fuchibol-backend-go/database"
 	"fuchibol-backend-go/models"
@@ -16,6 +19,23 @@ import (
 
 // Regexes for parsing m3u8 playlists
 var reUri = regexp.MustCompile(`URI="([^"]+)"`)
+
+// Shared HTTP client with connection pooling and timeouts to optimize proxying
+var proxyClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          1000,
+		MaxIdleConnsPerHost:   100, // Important for high concurrency requests to same IPTV provider
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+	Timeout: 15 * time.Second,
+}
 
 func resolveUrl(base *url.URL, ref string) string {
 	refUrl, err := url.Parse(ref)
@@ -31,6 +51,21 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 		return c.Status(400).SendString("Invalid target URL")
 	}
 
+	// Try to serve .ts segments from Redis cache if available
+	isTS := strings.HasSuffix(strings.ToLower(parsedTarget.Path), ".ts")
+	cacheKey := fmt.Sprintf("iptv:ts:%s", base64.URLEncoding.EncodeToString([]byte(targetUrl)))
+	
+	if isTS && database.RedisClient != nil {
+		cachedData, err := database.RedisClient.Get(database.Ctx, cacheKey).Bytes()
+		if err == nil && len(cachedData) > 0 {
+			c.Set("Access-Control-Allow-Origin", "*")
+			c.Set("Content-Type", "video/mp2t")
+			c.Set("Content-Length", strconv.Itoa(len(cachedData)))
+			c.Set("X-Cache", "HIT")
+			return c.Send(cachedData)
+		}
+	}
+
 	req, err := http.NewRequest("GET", targetUrl, nil)
 	if err != nil {
 		return c.Status(500).SendString("Failed to create request")
@@ -41,8 +76,7 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Connection", "keep-alive")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := proxyClient.Do(req)
 	if err != nil {
 		return c.Status(502).SendString(fmt.Sprintf("Bad Gateway: %v", err))
 	}
@@ -53,7 +87,7 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 	c.Set("Access-Control-Allow-Origin", "*")
 
 	// If it's a playlist, we MUST rewrite it to point back to our proxy
-	if strings.Contains(strings.ToLower(contentType), "mpegurl") || strings.HasSuffix(parsedTarget.Path, ".m3u8") {
+	if strings.Contains(strings.ToLower(contentType), "mpegurl") || strings.HasSuffix(strings.ToLower(parsedTarget.Path), ".m3u8") {
 		defer resp.Body.Close()
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -86,12 +120,31 @@ func fetchAndProxy(c *fiber.Ctx, targetUrl string) error {
 		return c.SendString(rewrittenLines)
 	}
 
-	// For .ts files or keys, stream them transparently without modifications
+	// For .ts files, stream them transparently and cache in Redis if successful
+	if isTS && resp.StatusCode == http.StatusOK && database.RedisClient != nil {
+		defer resp.Body.Close()
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err == nil {
+			// Cache in Redis with 60s TTL
+			database.RedisClient.Set(database.Ctx, cacheKey, bodyBytes, 60*time.Second)
+			c.Status(resp.StatusCode)
+			c.Set("Content-Type", "video/mp2t")
+			c.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
+			c.Set("X-Cache", "MISS")
+			return c.Send(bodyBytes)
+		}
+	}
+
+	// For keys or other files, stream them transparently without modifications
 	c.Status(resp.StatusCode)
 	c.Set("Content-Type", contentType)
+	c.Set("X-Cache", "MISS")
 	contentLength := resp.Header.Get("Content-Length")
 	if contentLength != "" {
 		c.Set("Content-Length", contentLength)
+		if size, err := strconv.Atoi(contentLength); err == nil && size >= 0 {
+			return c.SendStream(resp.Body, size)
+		}
 	}
 	
 	return c.SendStream(resp.Body)
@@ -131,6 +184,7 @@ func ProxyTS(c *fiber.Ctx) error {
 func RewritePlaylistContent(bodyStr string, parsedTarget *url.URL, baseURL string) string {
 	var rewrittenLines []string
 	lines := strings.Split(bodyStr, "\n")
+	baseURL = strings.TrimSuffix(baseURL, "/")
 	
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -147,7 +201,7 @@ func RewritePlaylistContent(bodyStr string, parsedTarget *url.URL, baseURL strin
 				if len(submatch) > 1 {
 					absUrl := resolveUrl(parsedTarget, submatch[1])
 					encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-					return fmt.Sprintf(`URI="/api/v1/proxy/ts?url=%s"`, encodedUrl)
+					return fmt.Sprintf(`URI="%s/api/v1/proxy/ts?url=%s"`, baseURL, encodedUrl)
 				}
 				return match
 			})
@@ -156,7 +210,7 @@ func RewritePlaylistContent(bodyStr string, parsedTarget *url.URL, baseURL strin
 			// 1. Rewrite plain URLs (usually .ts or nested .m3u8)
 			absUrl := resolveUrl(parsedTarget, trimmed)
 			encodedUrl := base64.URLEncoding.EncodeToString([]byte(absUrl))
-			newUrl := fmt.Sprintf("/api/v1/proxy/ts?url=%s", encodedUrl)
+			newUrl := fmt.Sprintf("%s/api/v1/proxy/ts?url=%s", baseURL, encodedUrl)
 			rewrittenLines = append(rewrittenLines, newUrl)
 		}
 	}

@@ -85,10 +85,34 @@ const scrollToBottom = async () => {
   }
 }
 
+const fetchChatHistory = async () => {
+  try {
+    const res = await fetch(`/api/v1/channels/${props.channelId}/chat`)
+    if (res.ok) {
+      const data = await res.json()
+      const history = data.map(msg => ({
+        id: msg.id,
+        type: 'user',
+        username: (msg.user && msg.user.username) || 'Usuario',
+        content: msg.content
+      }))
+      messages.value = [
+        { type: 'system', content: 'Bienvenido al chat de Fuchibol. Sé respetuoso con los demás.' },
+        ...history
+      ]
+      scrollToBottom()
+    }
+  } catch (err) {
+    console.error('Error fetching chat history:', err)
+  }
+}
+
 const connectSocket = () => {
   if (socket) {
     socket.close()
   }
+
+  fetchChatHistory()
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   socket = new WebSocket(`${protocol}//${window.location.host}/ws/chat?channel=${props.channelId}`)
@@ -120,10 +144,23 @@ const connectSocket = () => {
         emit('stream-reload')
         return
       }
+
+      if (msg.type === 'chat_cleared') {
+        messages.value = [
+          { type: 'system', content: msg.content || 'El chat ha sido limpiado por el moderador.' }
+        ]
+        return
+      }
+
+      if (msg.type === 'message_deleted') {
+        const deletedId = Number(msg.content)
+        messages.value = messages.value.filter(m => m.id !== deletedId)
+        return
+      }
       
       // Mapeamos el payload que manda Go a lo que espera la interfaz Vue
       messages.value.push({
-        id: Date.now(),
+        id: msg.id || Date.now(),
         type: 'user',
         username: msg.username || 'Usuario',
         content: msg.content
@@ -171,9 +208,22 @@ const sendMessage = () => {
   }
 }
 
-const deleteMessage = (msgId) => {
-  // Backend support pending
-  console.log("Delete message", msgId)
+const deleteMessage = async (msgId) => {
+  if (!confirm('¿Estás seguro de que deseas eliminar este mensaje?')) return
+  try {
+    const tokenObj = localStorage.getItem('fuchibol_user')
+    const token = tokenObj ? JSON.parse(tokenObj).token : ''
+    const res = await fetch(`/api/v1/channels/${props.channelId}/chat/${msgId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      alert(`Error al eliminar mensaje: ${err.error || 'Intenta de nuevo'}`)
+    }
+  } catch (err) {
+    console.error('Error deleting message:', err)
+  }
 }
 
 watch(() => props.channelId, () => {

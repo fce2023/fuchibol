@@ -18,6 +18,7 @@ import (
 func main() {
 	// Initialize Database
 	database.ConnectDB()
+	database.ConnectRedis()
 
 	// Initialize Background Jobs Client (Celery queue equivalent)
 	workers.InitAsynqClient()
@@ -62,6 +63,7 @@ func main() {
 	auth.Post("/register", controllers.Register)
 	auth.Post("/login", controllers.Login)
 	auth.Get("/me", controllers.Me)
+	auth.Patch("/me", controllers.UpdateMe)
 	auth.Post("/rotate-stream-key", controllers.RotateStreamKey)
 
 	// Channels Routes
@@ -73,10 +75,20 @@ func main() {
 	channels.Post("/:id/follow", controllers.FollowChannel)
 	channels.Post("/:id/unfollow", controllers.UnfollowChannel)
 	channels.Get("/:id/followers_list", controllers.GetFollowersList)
+	channels.Get("/:id/chat", controllers.GetChatHistory)
+	channels.Post("/:id/chat/clear", controllers.ClearChatHistory)
+	channels.Delete("/:id/chat/:msgId", controllers.DeleteChatMessage)
 	channels.Get("/me", controllers.GetMyChannel)
 	channels.Get("/:name", controllers.GetChannel)
 	channels.Patch("/me", controllers.UpdateChannel)
 	channels.Post("/logo", controllers.UploadLogo)
+
+	// Donations Routes
+	channels.Post("/:id/donations", controllers.ReportDonation)
+	channels.Post("/:id/donations/receipt", controllers.UploadDonationReceipt)
+	channels.Get("/:id/donations/ranking", controllers.GetDonationRanking)
+	channels.Get("/me/donations", controllers.GetAdminDonations)
+	channels.Patch("/me/donations/:donationId", controllers.ReviewDonation)
 
 	// Streams / Playback
 	streams := api.Group("/streams")

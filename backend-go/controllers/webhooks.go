@@ -99,6 +99,9 @@ func OnPublish(c *fiber.Ctx) error {
 			CreatedAt: time.Now(),
 		}
 		database.DB.Create(&newStream)
+
+		// Start the Chromecast/Smart-TV-friendly clean HLS for this OBS stream.
+		services.StartCleanHLS(req.Stream)
 	} else {
 		// Even for IPTV restream, it's good to track the stream name
 		channel.ActiveStreamName = req.Stream
@@ -161,6 +164,9 @@ func OnUnpublish(c *fiber.Ctx) error {
 			channel.IsLive = false
 			channel.ActiveStreamName = ""
 			database.DB.Save(&channel)
+
+			// Stop the clean HLS ffmpeg and remove its segments.
+			services.StopCleanHLS(req.Stream)
 
 			// Find the active stream and mark it ended
 			var activeStream models.Stream

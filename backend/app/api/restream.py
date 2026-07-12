@@ -178,6 +178,16 @@ async def ffmpeg_worker(channel_id: int, req_url: str, rtmp_url: str):
     
     while active_restreams.get(channel_id, {}).get("should_run", False):
         try:
+            # OPTIMIZATION: Check for viewers before starting/restarting FFmpeg
+            # This saves CPU and bandwidth when no one is watching
+            viewers_str = await redis_client.get(f"channel:{channel_id}:viewers")
+            if int(viewers_str or 0) == 0:
+                # No one watching, wait and check again
+                if retries == 0: # Only log once per idle period
+                    print(f"[RESTREAM] No viewers for channel {channel_id}, decoding is paused.")
+                await asyncio.sleep(2)
+                continue
+
             log_file = open(f"/tmp/ffmpeg_{channel_id}.log", "a")
             log_file.write(f"\n--- Starting FFmpeg restream for channel {channel_id} (Attempt {retries + 1}) ---\n")
             
@@ -205,7 +215,18 @@ async def ffmpeg_worker(channel_id: int, req_url: str, rtmp_url: str):
                     except:
                         process.kill()
                     break
-                await asyncio.sleep(2)
+                
+                # OPTIMIZATION: If viewers drop to 0, stop the process
+                # The outer loop will catch this and wait for viewers to return
+                viewers_str = await redis_client.get(f"channel:{channel_id}:viewers")
+                if int(viewers_str or 0) == 0:
+                    print(f"[RESTREAM] Viewers dropped to 0 for channel {channel_id}, pausing decoding.")
+                    process.terminate()
+                    cleanup_hls_files(channel_id)
+                    # We don't break yet, we let it clean up naturally in the next iteration
+                    # which will then hit the viewers == 0 check at the top of the outer loop.
+                
+                await asyncio.sleep(5)
                 
             exit_code = process.poll()
             log_file.write(f"\n--- FFmpeg exited with code {exit_code} ---\n")
@@ -214,6 +235,12 @@ async def ffmpeg_worker(channel_id: int, req_url: str, rtmp_url: str):
             if not active_restreams.get(channel_id, {}).get("should_run", False):
                 break # User manually stopped it
                 
+            # If we reached here because viewers dropped to 0, reset retries
+            viewers_str = await redis_client.get(f"channel:{channel_id}:viewers")
+            if int(viewers_str or 0) == 0:
+                retries = 0 # Reset retries when pausing normally
+                continue
+
             # Process died unexpectedly, retry
             retries += 1
             if retries >= max_retries:

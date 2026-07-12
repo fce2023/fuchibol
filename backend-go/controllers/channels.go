@@ -51,6 +51,10 @@ type UpdateChannelRequest struct {
 	WhatsappLink   *string `json:"whatsapp_link"`
 	TiktokLink     *string `json:"tiktok_link"`
 	LogoUrl        *string `json:"logo_url"`
+	YapeNumber     *string `json:"yape_number"`
+	PaypalLink     *string `json:"paypal_link"`
+	DonationMessage *string `json:"donation_message"`
+	DonationLongMessage *string `json:"donation_long_message"`
 }
 
 // UpdateChannel updates the user's channel
@@ -103,6 +107,18 @@ func UpdateChannel(c *fiber.Ctx) error {
 	}
 	if req.LogoUrl != nil {
 		channel.LogoUrl = req.LogoUrl
+	}
+	if req.YapeNumber != nil {
+		channel.YapeNumber = req.YapeNumber
+	}
+	if req.PaypalLink != nil {
+		channel.PaypalLink = req.PaypalLink
+	}
+	if req.DonationMessage != nil {
+		channel.DonationMessage = req.DonationMessage
+	}
+	if req.DonationLongMessage != nil {
+		channel.DonationLongMessage = req.DonationLongMessage
 	}
 
 	database.DB.Save(channel)
